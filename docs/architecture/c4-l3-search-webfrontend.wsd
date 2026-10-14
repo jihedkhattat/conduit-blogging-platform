@@ -1,0 +1,98 @@
+@startuml
+!include <C4/C4_Component>
+
+Person(user,"Conduit User","reads and writes articles as well as comments, add and edit user accounts")
+
+System_Boundary(conduit_block,"Conduit"){
+    Container_Boundary(conduit_frontend_web,"Conduit Web Frontend"){
+        /'
+        Provides a system to show, edit, and remove blog articles, user accounts, and comments in a webbrowser
+        [Vue.js/TypeScript]
+        '/
+        Component(api,"API","TypeScript","Provides Interface to Backend")
+        Component(components,"Components","TypeScript/Vue","Manage articles, authentication, tagging, likes")
+        Component(layouts,"Layouts","TypeScript/Vue","Basic Layout")
+        Component(pages,"Pages","TypeScript/Vue")
+        Component(router,"Router","TypeScript","Client-side routing, defines permissions")
+        Component(types,"Types","TypeScript","Defines Data Abstractions ")
+        Component(stores,"Stores","TypeScript","Stores user information")
+        Component(utils,"Utils","TypeScript","Request Handling, Formatting")
+        Component(main,"Main","TypeScript/Vue","Constructs App")
+        Component(spa,"index.html","HTML","Shows Single Page Application")
+        Component_Ext(vite_plugins,"Vite Layout/Routing Plugins","TypeScript","Setup Layout and Routing for Vue")
+        Component_Ext(vue,"Vue.js","TypeScript","Framework Vue.js 3")
+        Component_Ext(pinia,"Pinia","TypeScript","State Management")
+        Component_Ext(axios,"Axios","JavaScript/TypeScript","Promise-based HTTP Client for Asynchronous Requests")
+
+        ' Komponenten zur Volltextsuche
+        Component(search_vue, "search.vue", "Vue.js", "Komponente für Volltextsuche mit Eingabe, API-Aufruf, Anzeige und Pagination")
+        Component(fetch_call, "fetch(...) in search.vue", "JavaScript", "GET-Anfrage an /api/articles/search mit JWT-Token")
+        Component(the_header, "TheHeader.vue", "Vue.js", "Navigationsleiste mit Link zur Suche")
+        Component(article_preview, "ArticlePreview.vue", "Vue.js", "Komponente zur Anzeige eines einzelnen Artikels als Vorschau")
+    }
+
+    Container(conduit_backend_dot,"Conduit Backend","ASP.Net7.0/C#", "Handles all backend logic including search")
+}
+
+Rel(user,spa, "uses via webbrowser","HTTP/REST")
+Rel(main,vue, "initialize app")
+Rel(main,router, "setup routing")
+Rel(main,components, "constructs components")
+Rel(vue,router, "uses")
+Rel(vue,pinia, "uses")
+Rel(main,pinia, "initialize state management")
+Rel(api,types,"uses")
+Rel(api,conduit_backend_dot,"communicates frontend changes","HTTP/REST")
+Rel(api,utils,"uses request handling")
+Rel(axios,conduit_backend_dot,"conducts request handling","HTTP/REST")
+Rel(stores,api,"obtains user information")
+Rel(components,api,"obtains article information")
+Rel(components,types,"uses")
+Rel(components,utils,"uses formatting")
+Rel(components,stores,"uses")
+Rel(components,vue,"uses")
+Rel(components,router,"uses")
+Rel(pages,router,"uses")
+Rel(pages,api,"uses")
+Rel(pages,utils,"uses formatting")
+Rel(pages,stores,"uses")
+Rel(pages,types,"uses")
+Rel(pages,vue,"uses")
+Rel(utils,axios,"uses for request handling")
+Rel(spa,main,"uses")
+Rel(layouts,stores,"uses")
+Rel(router,vite_plugins,"uses")
+Rel(vite_plugins,components,"use layout templates")
+Rel(vite_plugins,layouts,"use layout templates")
+Rel(vite_plugins,pages,"setup file routing")
+
+'Beziehungen für Suche
+Rel(user, the_header, "klickt auf Suchlink", "Navigiert zu /search")
+Rel(the_header, router, "router-link zu /search")
+Rel(router, search_vue, "lädt Suchseite")
+Rel(search_vue, fetch_call, "ruft API-Endpunkt auf")
+Rel(fetch_call, conduit_backend_dot, "GET /api/articles/search")
+Rel(search_vue, stores, "greift auf userStore zu (Token)")
+Rel(search_vue, article_preview, "zeigt Artikelvorschau", "v-for")
+Rel(search_vue, vue, "nutzt reaktive Datenbindung")
+Rel(fetch_call, axios, "nutzt Axios für HTTP")
+
+SHOW_FLOATING_LEGEND()
+@enduml
+
+
+
+
+
+
+
+
+
+/'
+
+Dieses Diagramm zeigt, wie die Volltextsuche in das Vue.js-Webfrontend von Conduit integriert wurde. Das zentrale Element dieser Erweiterung ist die Vue-Komponente search.vue, die dem Benutzer ermöglicht, mehrere Suchbegriffe
+einzugeben und die passenden Artikel mit Paginierung anzuzeigen. Der Einstieg in die Suche erfolgt über einen neuen Link in der Navigationsleiste (TheHeader.vue), der über den Router zur Seite search.vue führt. Dort wird mit 
+fetch(...) eine Anfrage an den neuen Backend-Endpunkt /api/articles/search gesendet. Der dafür nötige Token wird aus dem userStore geladen. Die HTTP-Kommunikation erfolgt über das Axios-Modul. Die erhaltenen Artikel werden in 
+search.vue mit der Komponente ArticlePreview.vue angezeigt, die bereits im restlichen System für die Artikelanzeige verwendet wird
+
+'/

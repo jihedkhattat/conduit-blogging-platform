@@ -1,0 +1,85 @@
+@startuml
+!include <C4/C4_Component>
+
+System_Boundary(conduit_block,"Conduit"){
+    Container(conduit_frontend_web,"Conduit Web Frontend","Vue.js/TypeScript","Provides a system to show, edit, and remove blog articles, user accounts, and comments in a webbrowser")
+    Container(conduit_frontend_os,"Conduit OS Frontend","Flutter/Dart","Provides a system to show, edit, and remove blog articles, user accounts, and comments in an operating system.")
+    Container_Boundary(conduit_backend_dot,"Conduit Backend") {
+        /'
+            ASP.Net7.0/C#
+            Creates, reads, updates, deletes (CRUD-operations) blog articles, user accounts, and comments.
+        '/
+            Component(api,"API","C#","setup routes and services; starts application")
+            Component(core,"Core","C#","Representation of Conduit objects, defines database commands")
+            Component(data,"Data","C#","init and manage database")
+            Component(infrastructure,"Infrastructure","C#","handling custom authentication, logging and other utilities")
+            Component_Ext(carter,"Carter","C#","extension of ASP.NET to map endpoints",$link="https://github.com/CarterCommunity/Carter")
+            Component_Ext(asp.net,"ASP.NET Core","C#","Framework for WebApplication")
+
+
+        ' Komponenten zur Volltextsuche
+        Component(articles_module,"ArticlesModule","C#","Definiert die REST-Routen, einschließlich /api/articles/search")
+        Component(articles_handler,"ArticlesHandler","C#","Enthält die Suchlogik: SearchArticlesAsync()")
+
+        Container_Boundary(data_layer,"Data Layer") {
+            Component(repository,"ConduitRepository","C#","Implementiert IConduitRepository, inklusive GetAllArticlesAsync()")
+            Component(conduit_context,"ConduitContext","C#","Entity Framework Core-Kontext für den Zugriff auf Artikel, Nutzer, Kommentare")
+        }
+    }
+
+    ContainerDb(conduit_database,"Conduit Database","SQLite|in-memory or file-based/SQL ", "Stores articles, user accounts, and comments")
+}
+
+'general
+Rel(conduit_frontend_os,api,"communicates frontend changes","HTTP/REST")
+Rel(conduit_frontend_web,api,"communicates frontend changes","HTTP/REST")
+Rel(data,conduit_database,"communicates data changes","SQL")
+
+'backend
+Rel(api,data,"setup database handler")
+Rel(api,asp.net,"setup application")
+Rel(api,infrastructure,"uses")
+Rel(infrastructure,asp.net,"provides services")
+Rel(asp.net,data,"init database handler")
+Rel(data,core,"uses")
+Rel(api,core,"uses representations")
+Rel(carter,asp.net,"map API endpoints")
+Rel(api,carter,"register endpoints")
+
+'Beziehungen für Suche
+Rel(conduit_frontend_web, articles_module, "fragt Artikel ab", "HTTP/GET /api/articles/search")
+Rel(conduit_frontend_os, articles_module, "fragt Artikel ab", "HTTP/GET /api/articles/search")
+Rel(carter, articles_module, "mapped den Pfad /api/articles/search")
+Rel(articles_module, articles_handler, "ruft SearchArticlesAsync() auf")
+Rel(articles_handler, repository, "fragt alle Artikel ab", "GetAllArticlesAsync()")
+Rel(repository, conduit_context, "verwendet", "LINQ")
+Rel(conduit_context, conduit_database, "führt Abfragen aus", "SQL")
+Rel(repository, core, "verwendet Entitäten", "Article, Tag")
+Rel(articles_handler, core, "verwendet DTOs", "SearchQuery, ArticlesResponseDto")
+
+SHOW_FLOATING_LEGEND()
+@enduml
+
+
+
+
+
+
+
+
+
+
+
+
+/'
+
+Dieses Diagramm zeigt den Backend-Aufbau des Conduit-Systems. Das System basiert auf einer ASP.NET Core-Anwendung und besteht aus den Modulen API, Core, Data und Infrastructure. Diese Komponenten übernehmen typische
+Aufgaben wie das Erstellen, Anzeigen, Ändern und Löschen von Artikeln, Nutzern und Kommentaren. Die Daten werden mit Entity Framework Core verarbeitet und in einer SQLite-Datenbank gespeichert. Die Verbindung mit dem Frontend erfolgt über HTTP
+
+Für die neue Volltextsuche wurde die Architektur um mehrere Bestandteile erweitert: Das Modul `ArticlesModule` stellt die Route `/api/articles/search` bereit. Diese Route wird durch das Carter-Framework im Backend registriert
+Die Suchanfrage wird an `ArticlesHandler` weitergeleitet, der die Methode `SearchArticlesAsync()` aufruft. Dort erfolgt auch die eigentliche Filterung: Zuerst werden über `ConduitRepository.GetAllArticlesAsync()` alle Artikel aus der Datenbank 
+geladen (unter Verwendung ConduitContext).Anschließend prüft die Methode `SearchArticlesAsync()`, ob alle Suchwörter als ganze Wörter im Titel, im Text oder in den Tags eines Artikels vorkommen 
+und nach dieser Filterung wird das Suchergebnis an das Frontend zurückgegeben. Die DTOs `SearchQuery` und `ArticlesResponseDto` aus dem Core-Modul sorgen dabei für eine saubere Übergabe der Parameter und Ergebnisse
+
+
+'/

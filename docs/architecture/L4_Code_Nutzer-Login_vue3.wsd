@@ -1,0 +1,53 @@
+@startuml
+title Sequenzdiagramm: Nutzer-Login (Vue 3 → Backend) – Level 4
+
+actor User
+
+participant "Vue: AuthPage.vue" as Vue
+participant "Pinia: useUserStore" as Store
+participant "API: user.ts" as API
+participant "API Endpoint: POST /api/users/login" as HttpEndpoint
+participant "UserHandler.LoginAsync()" as Handler
+participant "IConduitRepository" as Repository
+participant "SQLite DB" as DB
+
+User -> Vue : Füllt Formular + klickt "Sign in"
+Vue -> Store : handleAuthAction("login", userData)
+Store -> API : loginUser(userData)
+API -> HttpEndpoint : POST /api/users/login
+
+HttpEndpoint -> Handler : LoginAsync(LoginUserDto login)
+Handler -> Repository : GetUserByEmailAsync(login.Email)
+Repository -> DB : SELECT * FROM Users WHERE Email = ?
+DB --> Repository : User oder null
+Repository --> Handler : User
+
+alt Gültige Anmeldedaten
+    Handler -> Handler : Prüfe Passwort (user.Password == login.Password)
+    Handler -> Handler : Erzeuge Token
+    Handler --> HttpEndpoint : Rückgabe UserDto mit JWT
+    HttpEndpoint --> API : 200 OK mit User + Token
+    API --> Store : Speichere Token (LocalStorage)
+    
+    /' bringt den Nutzer zur Startseite'/
+    Store --> Vue : router.push("/")
+    
+    Vue -> User : Zeigt Startseite
+else Ungültige Daten
+    Handler --> HttpEndpoint : Fehler (ProblemDetailsException)
+    HttpEndpoint --> API : 422 Unprocessable Entity
+    API --> Store : Fehlerobjekt
+    Store --> Vue : Zeigt Fehlermeldung
+end
+@enduml
+
+
+
+/' 
+
+Dieses Diagramm zeigt den Ablauf des Login-Vorgangs vom Benutzer bis zur Datenbank. Ein Benutzer füllt im Frontend (Vue.js) das Login-Formular aus und klickt auf "Sign in"
+Die AuthPage.vue ruft dann handleAuthAction() im Store auf, der wiederum loginUser() im API-Modul ausführt. Dieser sendet einen POST-Request an /api/users/login
+Im Backend verarbeitet die Methode LoginAsync() im UserHandler den Request. Sie ruft GetUserByEmailAsync() im Repository auf, das prüft, ob der Benutzer in der Datenbank existiert
+Wenn ja, wird ein JWT-Token erzeugt und an das Frontend zurückgesendet. Bei Fehlern wird eine passende Fehlermeldung (z. B. 422) zurückgegeben
+
+'/

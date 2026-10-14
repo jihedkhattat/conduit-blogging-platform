@@ -1,0 +1,55 @@
+@startuml
+title Sequenzdiagramm: Volltextsuche (Vue 3 → Backend) – Level 4
+
+actor User
+
+participant "Vue: search.vue" as SearchPage
+participant "Pinia: useUserStore" as TokenStore
+participant "fetch(...) in search.vue" as FetchCall
+participant "API Endpoint: GET /api/articles/search" as HttpEndpoint
+participant "ArticlesHandler.SearchArticlesAsync(...)" as Handler
+participant "ConduitRepository.GetAllArticlesAsync(...)" as Repository
+participant "SQLite DB" as Database
+
+User -> SearchPage : Gibt Suchbegriffe ein + klickt „Suchen“ (oder Enter)
+SearchPage -> TokenStore : Lese userInfo.token
+
+alt Token ist vorhanden
+    SearchPage -> FetchCall : GET /api/articles/search?...+ Authorization 
+    FetchCall -> HttpEndpoint : GET /api/articles/search
+
+    HttpEndpoint -> Handler : SearchArticlesAsync(query, limit, offset, user)
+    Handler -> Repository : GetAllArticlesAsync()
+    Repository -> Database : SELECT * FROM Articles + Tags + Author
+    Database --> Repository : Artikelliste
+    Repository --> Handler : Alle Artikel mit Tags + Author
+
+    Handler --> HttpEndpoint : Gefilterte Artikel (JSON)
+    HttpEndpoint --> FetchCall : HTTP 200 OK + JSON
+    FetchCall --> SearchPage : Artikel + Trefferanzahl
+    SearchPage -> User : Zeige Artikelvorschau + Paginierung
+
+else Kein Token vorhanden
+    SearchPage -> User : Zeige Fehlermeldung: „Nicht autorisiert. Bitte logge dich ein“
+end
+@enduml
+
+
+
+
+
+
+
+
+
+
+/'
+
+Dieses Sequenzdiagramm beschreibt den Ablauf der Volltextsuche in der Vue-3-Frontend. Zuerst gibt Der Nutzer einen oder mehrere Suchbegriffe in der search.vue-Komponente ein und klickt auf den „Suchen“-Button (oder Enter)
+Die Komponente prüft zunächst, ob ein gültiges Token über den Pinia-Store (useUserStore) vorhanden ist. Ist ein Token vorhanden, wird ein fetch-Aufruf mit Authorization-Header an den API-Endpunkt GET /api/articles/search gesendet
+Im Backend ruft der Controller die Methode SearchArticlesAsync(...) im ArticlesHandler auf. Diese wiederum holt mit GetAllArticlesAsync(...) alle Artikel aus der Datenbank, inklusive Tags und Autoreninformationen
+Die Treffer werden dann entsprechend der Suchbegriffe gefiltert. Das Ergebnis wird über den gesamten Aufrufpfad zurückgegeben und schließlich in search.vue dargestellt, inklusive Trefferanzahl und Paginierung
+
+Falls hingegen kein Token vorhanden ist, wird der HTTP-Request nicht ausgeführt. Stattdessen zeigt die search.vue-Komponente sofort eine Fehlermeldung an: Nicht autorisiert. Bitte logge dich ein.
+
+'/

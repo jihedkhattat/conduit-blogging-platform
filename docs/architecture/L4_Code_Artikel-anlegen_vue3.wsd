@@ -1,0 +1,53 @@
+@startuml
+title Sequenzdiagramm: Artikel anlegen (Vue 3 → Backend) – Level 4
+
+actor User
+
+participant "Vue: ArticleForm.vue" as Vue
+participant "API: article.ts" as API
+participant "API Endpoint: POST /api/articles" as HttpEndpoint
+participant "ArticlesHandler.CreateArticleAsync()" as Handler
+participant "IConduitRepository" as Repository
+participant "SQLite DB" as DB
+
+User -> Vue : Füllt Formular + klickt "Publish Article"
+Vue -> API : createArticle(articleData)
+API -> HttpEndpoint : POST /api/articles
+
+HttpEndpoint -> Handler : CreateArticleAsync(NewArticleDto, username)
+
+Handler -> Repository : GetUserByUsernameAsync(username)
+Repository -> DB : SELECT * FROM users WHERE username = ?
+DB --> Repository : User
+Repository --> Handler : User
+
+Handler -> Repository : UpsertTagsAsync(tagList)
+Repository -> DB : INSERT INTO tags ...
+DB --> Repository : Tag-Objekte
+Repository --> Handler : Tags
+
+Handler -> Handler : Article = new Article(...) + Author + Tags
+Handler -> Repository : AddArticle(article)
+Handler -> Repository : SaveChangesAsync()
+
+Repository -> DB : INSERT INTO articles ...
+DB --> Repository : OK
+Repository --> Handler : Success
+
+Handler --> HttpEndpoint : Rückgabe: Article
+HttpEndpoint --> API : 200 OK + Article
+API --> Vue : router.push("/article/slug")
+Vue -> User : Weiterleitung zum Artikel
+@enduml
+
+
+/' 
+
+Dieses Diagramm zeigt, wie ein neuer Artikel vom Frontend bis zur Datenbank erstellt wird.
+Ein Benutzer füllt in der Vue-Komponente ArticleForm.vue das Formular aus und klickt auf „Publish Article“, Dadurch wird 
+die Methode createArticle() im API-Modul aufgerufen, die einen POST-Request an /api/articles sendet
+Im Backend wird die Methode CreateArticleAsync() im ArticlesHandler aufgerufen, sie fragt zuerst den Benutzer anhand des Benutzernamens
+aus der Datenbank ab, danach werden die Tags gespeichert. Anschließend wird ein neuer Article erstellt, mit dem Benutzer und den Tags verknüpft und dann in der Datenbank gespeichert
+Am Ende sendet das Backend den neuen Artikel zurück an das Frontend, das den Benutzer automatisch zur Artikelseite weiterleitet
+
+'/

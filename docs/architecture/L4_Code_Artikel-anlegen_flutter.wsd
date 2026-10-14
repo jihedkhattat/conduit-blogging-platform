@@ -1,0 +1,59 @@
+@startuml
+title Sequenzdiagramm: Artikel anlegen (Flutter → Backend) – Level 4
+
+actor User
+
+participant "Flutter: AddArticleScreen" as UI
+participant "Flutter: ArticleBloc" as Bloc
+participant "API Endpoint: POST /api/articles" as HttpEndpoint
+participant "ArticlesHandler.CreateArticleAsync()" as Handler
+participant "IConduitRepository" as Repository
+participant "SQLite DB" as DB
+
+User -> UI : Füllt Formular + klickt "Publish Article"
+UI -> Bloc : SubmitArticleEvent(ArticleModel)
+Bloc -> HttpEndpoint : POST /api/articles
+
+HttpEndpoint -> Handler : CreateArticleAsync(NewArticleDto, username)
+Handler -> Repository : GetUserByUsernameAsync(username)
+Repository -> DB : SELECT * FROM users WHERE username = ?
+DB --> Repository : User
+Repository --> Handler : User
+
+Handler -> Repository : UpsertTagsAsync(tagList)
+Repository -> DB : INSERT INTO tags ...
+DB --> Repository : Tag-Objekte
+Repository --> Handler : Tags
+
+Handler -> Handler : Erstelle neuen Article + verknüpfe Author + Tags
+Handler -> Repository : AddArticle(article)
+Handler -> Repository : SaveChangesAsync()
+
+Repository -> DB : INSERT INTO articles ...
+DB --> Repository : OK
+Repository --> Handler : Artikel gespeichert
+
+Handler --> HttpEndpoint : Rückgabe: Article
+HttpEndpoint --> Bloc : 200 OK + Article
+Bloc --> UI : Zustand → ArticleAddSuccess
+UI -> User : Zeigt Artikelübersicht oder Weiterleitung
+
+@enduml
+
+/'
+
+Dieses Sequenzdiagramm zeigt den Ablauf beim Erstellen eines neuen Artikels in der Flutter-App – vom Nutzer bis zur Datenbank
+
+Ein Benutzer füllt in der Flutter-Oberfläche (AddArticleScreen) das Artikel-Formular aus (Titel, Beschreibung, Inhalt, Tags) und klickt auf „Publish Article“ 
+Daraufhin löst die UI ein SubmitArticleEvent im ArticleBloc aus
+Der Bloc sendet einen HTTP-POST-Request an /api/articles, mit dem vollständigen Artikelinhalt
+Der Request wird im Backend vom ArticlesHandler.CreateArticleAsync() verarbeitet
+Diese Methode ruft zunächst den aktuellen Benutzer aus der Datenbank ab (via GetUserByUsernameAsync()), da jeder Artikel einen Autor haben muss
+Dann werden die Tags des Artikels gespeichert (UpsertTagsAsync()), was zu einem Insert in die Tabelle tags führt
+Anschließend wird ein neues Article-Objekt erstellt, das mit dem Benutzer und den Tags verknüpft ist
+Der Artikel wird über AddArticle() im Repository gespeichert und mit SaveChangesAsync() in der Datenbank angelegt (INSERT INTO articles).
+Zum Schluss sendet das Backend den gespeicherten Artikel zurück an den Nutzer
+Der Bloc erkennt den Erfolg und wechselt in den Zustand ArticleAddSuccess
+Die UI leitet den Benutzer dann entweder zurück zur Artikelübersicht oder zeigt den neuen Artikel an
+
+'/

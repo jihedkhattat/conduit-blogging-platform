@@ -1,0 +1,2714 @@
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github "a/Backend-Adressen im Backend.md" "M1_abgabe/repo/Backend-Adressen im Backend.md"
+--- "a/Backend-Adressen im Backend.md"	1970-01-01 01:00:00.000000000 +0100
++++ "a/Backend-Adressen im Backend.md"	2025-04-25 21:50:46.000000000 +0200
+@@ -0,0 +1,33 @@
++- Vue3.js
++
++Im Vue3.js-Frontend erfolgt die Konfiguration der Backend-Adresse über die Datei vite.config.ts. Dort ist ein Proxy (leitet Anfragen vom Frontend an das Backend weiter, ohne dass das Frontend die genaue Adresse des Backends kennen muss)
++für alle API-Anfragen definiert:
++
++
++proxy: {
++      '/api': {
++        changeOrigin: true,
++        target: 'http://localhost:8081', // '^http:\/\/(localhost|127\.0\.0\.1|api)(:\d+)?',
++        rewrite: path => path.replace(/^\/api/, ''), // Entfernt '/api' aus dem Pfad
++      },
++    },
++
++
++Diese Einstellung bewirkt, dass alle HTTP-Anfragen, die mit /api beginnen, automatisch an http://localhost:8081 weitergeleitet werden, das ist die Adresse des ASP.NET-Backends 
++und so müssen die Komponenten im Frontend keine vollständigen URLs angeben und bleiben unabhängig von der genauen Serveradresse
++
++
++- Flutter
++
++Im Flutter-Frontend befindet sich die zentrale Konfiguration der Backend-Adresse in der Datei constant.dart. Dort ist BASE_URL auf die lokale Backend-Adresse gesetzt:
++
++static const BASE_URL = "http://localhost:8081";
++
++Darauf werden in derselben Datei alle weiteren API-Endpunkte wie Login, Registrierung, Artikel, Kommentare usw. definiert :
++
++
++static const LOGIN = BASE_URL + SUB_URL + "/users/login";
++static const ALL_ARTICLES = BASE_URL + SUB_URL + "/articles";
++
++
++Durch diese zentrale Struktur kann die Backend-Adresse leicht angepasst werden, ohne jede einzelne Komponente ändern zu müssen
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/Frameworks.md M1_abgabe/repo/apps/Frameworks.md
+--- a/apps/Frameworks.md	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/Frameworks.md	2025-04-25 21:50:46.000000000 +0200
+@@ -0,0 +1,33 @@
++ASP.NET:
++
++- ASP.NET Core ist ein modernes Webframework von Microsoft. Es läuft auf verschiedenen Plattformen und wird verwendet, um Web-APIs und Webseiten zu erstellen. 
++In unserem Projekt bildet ASP.NET Core das Backend. Es empfängt Anfragen vom Frontend, verarbeitet sie, spricht mit der Datenbank (SQLite) und liefert passende Antworten über eine REST-API zurück
++
++- ASP.NET Core nutzt Dependency Injection, um Klassen zu verbinden. Die Datenbankanbindung erfolgt mit Entity Framework Core. REST-Controller stellen die 
++API-Endpunkte bereit, und mit JWT erfolgt die Authentifizierung der Nutzer
++
++Vue3.js:
++
++- Vue3.js ist ein JavaScript-Framework, mit dem man moderne Webseiten mit einzelnen Komponenten aufbauen kann. Es ist leicht zu lernen und sehr flexibel. 
++Vue.js wird im Projekt als Web-Frontend verwendet. Damit können Nutzer Artikel schreiben, Kommentare lesen und ihr Profil bearbeiten
++
++- Die Oberfläche ist aus vielen Komponenten zusammengesetzt. Der Vue Router sorgt für die Navigation zwischen Seiten
++
++Flutter:
++
++- Flutter ist ein Framework von Google, mit dem man Apps für Android und iOS gleichzeitig entwickeln kann. Die Sprache, die dabei verwendet wird, heißt Dart. 
++Flutter ist in diesem Projekt das mobile Frontend. Es bietet dieselben Funktionen wie die Webversion, nur eben für Smartphones
++
++- Die App besteht aus sogenannten Widgets. Manche speichern Daten (StatefulWidget), andere nicht (StatelessWidget). Die Navigation zwischen Seiten erfolgt mit 
++dem Navigator. API-Aufrufe werden mit http gemacht, und das Layout passt sich automatisch an den Bildschirm an
++
++REST-APIs:
++
++- REST ist eine Art, wie Frontend und Backend miteinander kommunizieren über das Internet und mit einfachen HTTP-Anfragen wie GET oder POST. Im Projekt sprechen
++die Frontends (Vue.js und Flutter) über eine REST-API mit dem Backend. Zum Beispiel kann das Frontend einen Artikel abrufen oder einen Kommentar speichern, jeweils durch eine passende Anfrage
++
++Reactive Programming:
++
++- Bei reaktivem Programmieren reagieren Programme automatisch auf Änderungen – zum Beispiel wenn sich Daten ändern, wird die Oberfläche direkt aktualisiert
++
++- In Vue.js wird mit ref und computed gearbeitet, um reaktiv zu sein. In Flutter nutzt man z.B. Bloc, Streams oder setState, damit sich das UI automatisch anpasst
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github "a/apps/dotnet/Datenbank & Datenbankschema.md" "M1_abgabe/repo/apps/dotnet/Datenbank & Datenbankschema.md"
+--- "a/apps/dotnet/Datenbank & Datenbankschema.md"	1970-01-01 01:00:00.000000000 +0100
++++ "a/apps/dotnet/Datenbank & Datenbankschema.md"	2025-04-25 21:50:46.000000000 +0200
+@@ -0,0 +1,23 @@
++Das Backend erstellt die Datenbank mit Entity Framework Core (EF Core). Dieses Tool hilft dem Programm, mit der Datenbank zu arbeiten, ohne
++dass man selbst komplizierte SQL-Befehle schreiben muss.In der Datei Program.cs wird zuerst eine Verbindung zu einer 
++sogenannten In-Memory-Datenbank hergestellt, das bedeutet, die Datenbank befindet sich nur im Arbeitsspeicher und ist leer, sobald das Programm beendet wird. Das geschieht mit folgenden Zeilen:  
++
++
++var connectionString = configuration.GetConnectionString("Sqlite") ?? "Filename=:memory:";
++var connection = new SqliteConnection(connectionString);
++connection.Open();
++
++Hier schaut Das Programm zuerst nach, ob ein Speicherort für die Datenbank angegeben wurde,
++wenn nicht, wird automatisch eine temporäre Datenbank im Arbeitsspeicher erstellt und dann wird die Verbindung zu dieser Datenbank geöffnet
++
++
++Danach wird EF Core so eingerichtet, dass es mit dieser Datenbank arbeitet. Das steht hier:  
++
++builder.Services.AddDbContext<ConduitContext>(options => { options.UseSqlite(connection); });
++
++und ganz am Ende sagt das Programm mit folgendem Befehl:  
++
++context?.Database.EnsureCreated();
++
++dass die Datenbank, falls sie leer ist, automatisch alle Tabellen erstellen soll. Diese Tabellen entstehen dabei aus dem Code, das alles passiert, sobald 
++das Programm gestartet wird. Man muss also keine Datenbank von Hand anlegen, EF Core übernimmt das automatisch im Hintergrund
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Api/Features/Articles/ArticlesHandler.cs M1_abgabe/repo/apps/dotnet/src/Api/Features/Articles/ArticlesHandler.cs
+--- a/apps/dotnet/src/Api/Features/Articles/ArticlesHandler.cs	2025-04-08 09:42:26.000000000 +0200
++++ b/apps/dotnet/src/Api/Features/Articles/ArticlesHandler.cs	2025-04-25 21:50:46.000000000 +0200
+@@ -3,6 +3,7 @@
+ 
+ namespace Realworlddotnet.Api.Features.Articles;
+ 
++// Handler zur Verarbeitung aller Artikel-bezogenen Anfragen
+ public class ArticlesHandler : IArticlesHandler
+ {
+     private readonly IConduitRepository _repository;
+@@ -12,28 +13,39 @@
+         _repository = repository;
+     }
+ 
++//----------------------------------------------------------------------------------------------------------------
++    // Erstellt einen neuen Artikel
+     public async Task<Article> CreateArticleAsync(
+         NewArticleDto newArticle, string username, CancellationToken cancellationToken)
+     {
++        // Autor des Artikels anhand des Tokens (Usernamen) ermitteln
+         var user = await _repository.GetUserByUsernameAsync(username, cancellationToken);
++
++        // Tags in der Datenbank hinzufügen oder aktualisieren
+         var tags = await _repository.UpsertTagsAsync(newArticle.TagList, cancellationToken);
+-        await _repository.SaveChangesAsync(cancellationToken);
++        await _repository.SaveChangesAsync(cancellationToken); // Änderungen speichern
+ 
++        // Neues Artikel-Objekt erstellen
+         var article = new Article(
+                 newArticle.Title,
+                 newArticle.Description,
+                 newArticle.Body
+-            ) { Author = user, Tags = tags.ToList() }
+-            ;
++            ) { Author = user, Tags = tags.ToList() };
+ 
++        // Artikel dem Repository hinzufügen und dauerhaft speichern
+         _repository.AddArticle(article);
+         await _repository.SaveChangesAsync(cancellationToken);
++
++        // Der neue Artikel wird zurückgegeben
+         return article;
+     }
+ 
++//----------------------------------------------------------------------------------------------------------------
++    // Bestehenden Artikel aktualisieren
+     public async Task<Article> UpdateArticleAsync(
+         ArticleUpdateDto update, string slug, string username, CancellationToken cancellationToken)
+     {
++        // Artikel anhand des Slugs abrufen
+         var article = await _repository.GetArticleBySlugAsync(slug, false, cancellationToken);
+ 
+         if (article == null)
+@@ -41,16 +53,21 @@
+             throw new ProblemDetailsException(422, "ArticleNotFound");
+         }
+ 
++        // Prüfen, ob der Benutzer der Autor ist
+         if (username != article.Author.Username)
+         {
+             throw new ProblemDetailsException(403, $"{username} is not the author");
+         }
+ 
++        //4. Artikel mit neuen Daten aktualisieren
+         article.UpdateArticle(update);
+         await _repository.SaveChangesAsync(cancellationToken);
++
+         return article;
+     }
+ 
++//----------------------------------------------------------------------------------------------------------------
++    // Artikel löschen
+     public async Task DeleteArticleAsync(string slug, string username, CancellationToken cancellationToken)
+     {
+         var article = await _repository.GetArticleBySlugAsync(slug, false, cancellationToken) ??
+@@ -59,6 +76,7 @@
+                           Status = 422, Title = "Article not found", Detail = $"Slug: {slug}"
+                       });
+ 
++        // Nur der Autor darf den Artikel löschen
+         if (username != article.Author.Username)
+         {
+             throw new ProblemDetailsException(403, $"{username} is not the author");
+@@ -68,13 +86,21 @@
+         await _repository.SaveChangesAsync(cancellationToken);
+     }
+ 
++
++//------------------------------------------------------------------------------------------------
++    // Artikel-Liste mit optionalem Filter abrufen
+     public Task<ArticlesResponseDto> GetArticlesAsync(ArticlesQuery query, string? username, bool isFeed,
+         CancellationToken cancellationToken)
+-    {
++    {       // Diese Methode wird vom Flutter-BLoC (AllArticlesBloc) aufgerufen,
++           // wenn ein AllArticlesEvent oder FetchNextAllArticlesEvent ausgelöst wird.
++          // Diese Methode wird vom Vue-Frontend bei jedem Laden oder Seitenwechsel aufgerufen.
++         // Sie verarbeitet eine GET-Anfrage mit Parametern wie Limit, Offset, Tag, Autor etc.
++        // Das Repository führt eine Datenbankabfrage durch (inkl. Filterung).
++       // Die Antwort ist eine paginierte Liste von Artikeln mit Gesamtanzahl.
+         return _repository.GetArticlesAsync(query, username, false, cancellationToken);
+     }
+ 
+-
++    // Einzelnen Artikel (inkl. Kommentare) anhand des Slugs abrufen
+     public async Task<Article> GetArticleBySlugAsync(string slug, string? username, CancellationToken cancellationToken)
+     {
+         var article = await _repository.GetArticleBySlugAsync(slug, false, cancellationToken) ??
+@@ -83,15 +109,20 @@
+                           Status = 422, Title = "Article not found", Detail = $"Slug: {slug}"
+                       });
+ 
++        // Kommentare zum Artikel laden und zuweisen
+         var comments = await _repository.GetCommentsBySlugAsync(slug, username, cancellationToken);
+         article.Comments = comments;
+ 
+         return article;
+     }
+ 
++ //-------------------------------------------------------------------------------------------------------   
++
++    // Kommentar zu einem Artikel hinzufügen
+     public async Task<Core.Entities.Comment> AddCommentAsync(string slug, string username, CommentDto commentDto,
+         CancellationToken cancellationToken)
+     {
++        // Autor und Artikel ermitteln
+         var user = await _repository.GetUserByUsernameAsync(username, cancellationToken);
+         var article = await _repository.GetArticleBySlugAsync(slug, false, cancellationToken) ??
+                       throw new ProblemDetailsException(new HttpValidationProblemDetails
+@@ -99,6 +130,7 @@
+                           Status = 422, Title = "Article not found", Detail = $"Slug: {slug}"
+                       });
+ 
++        // Kommentar erstellen und dem Artikel hinzufügen
+         var comment = new Core.Entities.Comment(commentDto.body, user.Username, article.Id);
+         _repository.AddArticleComment(comment);
+ 
+@@ -106,6 +138,8 @@
+         return comment;
+     }
+ 
++//----------------------------------------------------------------------------------------------------------------
++    // Kommentar von Artikel löschen
+     public async Task RemoveCommentAsync(string slug, int commentId, string username,
+         CancellationToken cancellationToken)
+     {
+@@ -115,14 +149,17 @@
+                 Status = 422, Title = "Article not found", Detail = $"Slug: {slug}"
+             });
+ 
++        // Alle Kommentare des Artikels abrufen
+         var comments = await _repository.GetCommentsBySlugAsync(slug, username, cancellationToken);
++
++        // Kommentar mit passender ID finden
+         var comment = comments.FirstOrDefault(x => x.Id == commentId) ??
+                       throw new ProblemDetailsException(new HttpValidationProblemDetails
+                       {
+                           Status = 422, Title = "Comment not found", Detail = $"CommentId {commentId}",
+                       });
+ 
+-
++        // Nur der Autor darf seinen Kommentar löschen
+         if (comment.Author.Username != username)
+             throw new ProblemDetailsException(new HttpValidationProblemDetails
+             {
+@@ -133,13 +170,22 @@
+         await _repository.SaveChangesAsync(cancellationToken);
+     }
+ 
+-    public async Task<List<Core.Entities.Comment>> GetCommentsAsync(string slug, string? username,
++//------------------------------------------------------------------------------------------------
++    // Alle Kommentare eines Artikels abrufen
++public async Task<List<Core.Entities.Comment>> GetCommentsAsync(string slug, string? username,
+         CancellationToken cancellationToken)
+     {
++
++        // Diese Methode wird aufgerufen, wenn das Frontend einen GET-Request an die Route /api/articles/{slug}/comments schickt
++        // Mit dieser Zeile fragt das Backend beim Repository alle Kommentare ab,  die zu diesem Artikel gehören – aus der Datenbank
+         var comments = await _repository.GetCommentsBySlugAsync(slug, username, cancellationToken);
++        
++        // Die erhaltene Liste mit Kommentaren wird an das Frontend zurückgegeben,  damit sie dort angezeigt werden können
+         return comments;
+     }
+ 
++//----------------------------------------------------------------------------------------------------------------
++    // Artikel als Favorit markieren
+     public async Task<Article> AddFavoriteAsync(string slug, string username, CancellationToken cancellationToken)
+     {
+         var user = await _repository.GetUserByUsernameAsync(username, cancellationToken);
+@@ -149,6 +195,7 @@
+                           Status = 422, Title = "Article not found", Detail = $"Slug: {slug}"
+                       });
+ 
++        // Falls noch kein Favorit vorhanden ist, hinzufügen
+         var articleFavorite = await _repository.GetArticleFavoriteAsync(user.Username, article.Id);
+ 
+         if (articleFavorite is null)
+@@ -157,10 +204,13 @@
+             await _repository.SaveChangesAsync(cancellationToken);
+         }
+ 
++        // Aktualisierten Artikel zurückgeben
+         article = await _repository.GetArticleBySlugAsync(slug, false, cancellationToken);
+         return article!;
+     }
+ 
++//----------------------------------------------------------------------------------------------------------------
++    // Artikel aus den Favoriten entfernen
+     public async Task<Article> DeleteFavorite(string slug, string username, CancellationToken cancellationToken)
+     {
+         var user = await _repository.GetUserByUsernameAsync(username, cancellationToken);
+@@ -172,6 +222,7 @@
+ 
+         var articleFavorite = await _repository.GetArticleFavoriteAsync(user.Username, article.Id);
+ 
++        // Falls Favorit vorhanden ist, entfernen
+         if (articleFavorite is not null)
+         {
+             _repository.RemoveArticleFavorite(articleFavorite);
+@@ -182,6 +233,8 @@
+         return article!;
+     }
+ 
++//----------------------------------------------------------------------------------------------------------------
++    // Alle verfügbaren Tags abrufen
+     public async Task<string[]> GetTags(CancellationToken cancellationToken = default)
+     {
+         var tags = await _repository.GetTagsAsync(cancellationToken);
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Api/Features/Users/UserHandler.cs M1_abgabe/repo/apps/dotnet/src/Api/Features/Users/UserHandler.cs
+--- a/apps/dotnet/src/Api/Features/Users/UserHandler.cs	2025-04-08 09:42:26.000000000 +0200
++++ b/apps/dotnet/src/Api/Features/Users/UserHandler.cs	2025-04-25 21:50:46.000000000 +0200
+@@ -13,26 +13,47 @@
+         _repository = repository;
+         _tokenGenerator = tokenGenerator;
+     }
+-
++//---- für "sign-up" ---------------------------------------------------
+     public async Task<UserDto> CreateAsync(NewUserDto newUser, CancellationToken cancellationToken)
+-    {
+-        var user = new User(newUser);
+-        await _repository.AddUserAsync(user);
+-        await _repository.SaveChangesAsync(cancellationToken);
+-        var token = _tokenGenerator.CreateToken(user.Username);
+-        return new UserDto(user.Username, user.Email, token, user.Bio, user.Image);
+-    }
++{
++    // Erstellt ein neues Benutzerobjekt aus den übermittelten Registrierungsdaten
++    var user = new User(newUser);
++
++    // Fügt den neuen Benutzer über das Repository zur Datenbank hinzu (noch nicht gespeichert)
++    await _repository.AddUserAsync(user);
++
++    // Speichert die Änderungen dauerhaft in der Datenbank
++    await _repository.SaveChangesAsync(cancellationToken);
++
++    // Erstellt ein JWT-Token für den neuen Benutzer
++    var token = _tokenGenerator.CreateToken(user.Username);
++
++    // Gibt die Benutzerdaten zusammen mit dem Token im UserDto an das Frontend zurück
++    return new UserDto(user.Username, user.Email, token, user.Bio, user.Image);
++}
++//------------------------------------------------------------------------
+ 
++
++
++
++//-- für Nutzer_profile_update --------------------------------------------------
+     public async Task<UserDto> UpdateAsync(
+-        string username, UpdatedUserDto updatedUser, CancellationToken cancellationToken)
+-    {
+-        var user = await _repository.GetUserByUsernameAsync(username, cancellationToken);
+-        user.UpdateUser(updatedUser);
+-        await _repository.SaveChangesAsync(cancellationToken);
+-        var token = _tokenGenerator.CreateToken(user.Username);
+-        return new UserDto(user.Username, user.Email, token, user.Bio, user.Image);
+-    }
++    string username, UpdatedUserDto updatedUser, CancellationToken cancellationToken)
++{
++    // Sucht den eingeloggten Benutzer anhand seines Benutzernamens
++    var user = await _repository.GetUserByUsernameAsync(username, cancellationToken);
++
++    // Übernimmt die übermittelten neuen Profildaten (z. B. Passwort, Bio, Bild)
++    user.UpdateUser(updatedUser);
++
++    // Speichert die Änderungen dauerhaft in der Datenbank
++    await _repository.SaveChangesAsync(cancellationToken);
+ 
++    // Erstellt ein neues Token und gibt die aktualisierten Benutzerdaten zurück
++    var token = _tokenGenerator.CreateToken(user.Username);
++    return new UserDto(user.Username, user.Email, token, user.Bio, user.Image);
++}
++//----------------------------------------------------
+     public async Task<UserDto> LoginAsync(LoginUserDto login, CancellationToken cancellationToken)
+     {
+         var user = await _repository.GetUserByEmailAsync(login.Email);
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Api/Program.cs M1_abgabe/repo/apps/dotnet/src/Api/Program.cs
+--- a/apps/dotnet/src/Api/Program.cs	2025-04-08 09:42:26.000000000 +0200
++++ b/apps/dotnet/src/Api/Program.cs	2025-04-25 21:50:46.000000000 +0200
+@@ -33,12 +33,29 @@
+ #pragma warning disable S125
+ // to use a file based SQLite use: "Filename=../realworld.db";
+ #pragma warning restore S125
+-var connectionString = configuration.GetConnectionString("Sqlite") ?? "Filename=:memory:";
++
++
++//--------------
++
++
++// var connectionString = configuration.GetConnectionString("Sqlite") ?? "Filename=:memory:";
++
++
++// Hier wird der Pfad zur SQLite-Datenbankdatei erstellt
++var dbPath = Path.Combine(Directory.GetCurrentDirectory(), "..", "..", "realworld.db");
++
++// dann wird der absolute Pfad berechnet, damit die Datenbank-Datei zuverlässig gefunden wird
++var fullDbPath = Path.GetFullPath(dbPath);
++
++// Zum Schluss wird ein Verbindungs-String erstellt, der die Datenbankdatei als Speicherort angibt,
++// damit verwendet das Backend eine dauerhafte SQLite-Datenbank anstelle einer In-Memory-Datenbank
++var connectionString = $"Data Source={fullDbPath}";
++
++//--------------
+ 
+ var connection = new SqliteConnection(connectionString);
+ connection.Open();
+ 
+-
+ builder.Services.AddEndpointsApiExplorer();
+ builder.Services.AddSwaggerGen(c =>
+ {
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/bloc/all_articles_bloc/all_articles_bloc.dart M1_abgabe/repo/apps/flutter/lib/bloc/all_articles_bloc/all_articles_bloc.dart
+--- a/apps/flutter/lib/bloc/all_articles_bloc/all_articles_bloc.dart	2025-04-08 09:42:26.000000000 +0200
++++ b/apps/flutter/lib/bloc/all_articles_bloc/all_articles_bloc.dart	2025-04-25 21:50:46.000000000 +0200
+@@ -41,7 +41,10 @@
+   AllArticlesRepo repo;
+   int offset = 0;
+   final int limit = 10;
++
+   AllArticlesBloc({required this.repo}) : super(AllArticlesInitialState()) {
++    // Beim Öffnen des Feeds oder der Übersichtsseite wird ein AllArticlesEvent ausgelöst
++    // → Methode _onAllArticlesEvent wird aufgerufen
+     on<AllArticlesEvent>(_onAllArticlesEvent);
+   }
+ 
+@@ -49,44 +52,54 @@
+       AllArticlesEvent event, Emitter<AllArticlesState> emit) async {
+     try {
+       if (event is FetchNextAllArticlesEvent) {
++        // Bei Scroll oder Pagination wird ein anderes Offset gesetzt
+         print(" The Length is ${event.length!.toInt()}");
+         offset = event.length!.toInt();
+       } else {
++        // Beim ersten Laden des Feeds
+         offset = 0;
+       }
++
+       if (offset == 0) {
+-        emit(AllArticlesLoadingState());
++        emit(AllArticlesLoadingState()); // Ladezustand anzeigen
+       }
+ 
++      // Es wird ein GET-Request mit limit & offset an das Backend gesendet
+       List<AllArticlesModel> aData =
+           (await repo.getAllArticlesData(offset: offset, limit: limit))
+               .cast<AllArticlesModel>();
+ 
+       if (aData.isEmpty) {
+-        emit(NoAllArticlesState());
++        emit(NoAllArticlesState()); // Kein Artikel vorhanden
+       } else {
+         bool hasReachedMax = aData.length < 10;
+ 
++        // Falls es sich um nachgeladene Artikel handelt
+         if (event is FetchNextAllArticlesEvent) {
+           final currentState = state;
+           if (currentState is AllArticlesLoadedStete) {
++            // Bestehende Artikel mit neuen kombinieren
+             aData = [...currentState.allArticleslist, ...aData];
+           }
+         }
+ 
++        // Der Zustand AllArticlesLoadedStete speichert die Daten für die UI
+         emit(AllArticlesLoadedStete(
+           allArticleslist: aData,
+           hasReachedMax: hasReachedMax,
+         ));
+       }
+     } on SocketException {
++      // Kein Internet
+       emit(AllArticlesNoInternateState());
+     } catch (e) {
+       print(e);
++      // Fehlerzustand
+       emit(AllArticlesErrorState(msg: e.toString()));
+     }
+   }
+ }
++
+ // _onFetchNextMyArticlesEvent(
+ //       MyArticlesEvent event, Emitter<MyArticlesState> emit) async {
+ //     MyArticlesLoadedStete curentstate = state as MyArticlesLoadedStete;
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/bloc/profile_bloc/profile_bloc.dart M1_abgabe/repo/apps/flutter/lib/bloc/profile_bloc/profile_bloc.dart
+--- a/apps/flutter/lib/bloc/profile_bloc/profile_bloc.dart	2025-04-08 09:42:26.000000000 +0200
++++ b/apps/flutter/lib/bloc/profile_bloc/profile_bloc.dart	2025-04-25 21:50:46.000000000 +0200
+@@ -1,72 +1,94 @@
+-import 'dart:io';
+ 
++import 'dart:io';
+ import 'package:conduit/bloc/profile_bloc/profile_event.dart';
+ import 'package:conduit/bloc/profile_bloc/profile_state.dart';
+ import 'package:conduit/repository/all_article_repo.dart';
+ import 'package:flutter_bloc/flutter_bloc.dart';
+ 
+ class ProfileBloc extends Bloc<ProfileEvent, ProfileState> {
+-  AllArticlesRepo repo;
++  final AllArticlesRepo repo;
++
++ 
+   ProfileBloc({required this.repo}) : super(ProfileInitialState()) {
+     on<FetchProfileEvent>(_onFetchProfileEvent);
+-    on<UpdateProfileEvent>(_onUpdateProfileEvent);
++    on<UpdateProfileEvent>(_onUpdateProfileEvent); // Registriert den Event-Handler für Profilaktualisierung
+     on<ChangePasswordEvent>(_onChangePasswordEvent);
+   }
+ 
++  // Handler für das Laden des Profils
+   _onFetchProfileEvent(
+       FetchProfileEvent event, Emitter<ProfileState> emit) async {
+     try {
+-      emit(ProfileLoadingState());
+-      dynamic aData = (await repo.getProfileData());
++      emit(ProfileLoadingState()); // Ladezustand aktivieren
++      dynamic aData = await repo.getProfileData(); // API-Aufruf für Profildaten
+ 
+       if (aData != null) {
+-        //   emit(NoProfileState());
+-        // } else {
++        // Wenn Daten erfolgreich geladen wurden, gib sie an das UI weiter
+         emit(ProfileLoadedState(profileList: aData));
+       }
+     } on SocketException {
++      // Kein Internet
+       emit(ProfileNoInternetState());
+     } catch (e) {
++      // Sonstige Fehler beim Laden
+       print(e);
+       emit(ProfileLoadedErrorState(msg: e.toString()));
+     }
+   }
+ 
++  //sendet aktualisierte Profildaten an das 
++  //Backend und steuert die Rückmeldung an die UI.
++  //--------------------------------------------------------------------
+   _onUpdateProfileEvent(
+       UpdateProfileEvent event, Emitter<ProfileState> emit) async {
+-    emit(UpdateProfileLoadingState());
++    emit(UpdateProfileLoadingState()); // Ladezustand speziell für Update
+     try {
+-      emit(ProfileLoadingState());
++      emit(ProfileLoadingState()); // Allgemeiner Ladezustand
++
++      // Sende neue Profildaten an das Backend via HTTP-Request
+       dynamic data = await repo.updateProfile(event.profileModel);
++
+       if (data != true) {
++        // Erfolgreiche Antwort → Zustand mitteilen (z. B. UI-Feedback, Navigation)
+         emit(UpdateProfileSuccessState());
+       } else {
+-        emit(NoProfileState());
++        emit(NoProfileState()); // Sonderfallbehandlung
+       }
+     } on SocketException {
++      // Kein Internet
+       emit(ProfileNoInternetState());
+     } catch (e) {
++      // Fehler beim Update-Vorgang
+       print(e);
+       emit(UpdateProfileErrorState(msg: e.toString()));
+     }
+   }
++//--------------------------------------------------------------------------
+ 
++
++
++  // Handler für das Ändern des Passworts
++  //-------------------------------------------------------------------------
+   _onChangePasswordEvent(
+       ChangePasswordEvent event, Emitter<ProfileState> emit) async {
+-    emit(ChangePasswordLoadingState());
++    emit(ChangePasswordLoadingState()); // Ladezustand für Passwortänderung
+     try {
++      // Sende neues Passwort an das Backend
+       dynamic data = await repo.changePassword(event.profileModel);
+       if (data == true) {
++        // Erfolgreich → UI informiert den Nutzer, ggf. Logout
+         emit(ChangePasswordSuccessState());
+       } else {
++        // Backend meldet einen Fehler (z. B. ungültiges Format)
+         emit(ChangePasswordErrorState(
+-            message: "Something want wrong, please try again later"));
++            message: "Something went wrong, please try again later"));
+       }
+     } on SocketException {
+-      emit(ProfileNoInternetState());
++      emit(ProfileNoInternetState()); // Kein Internet
+     } catch (e) {
+-      print(e);
++      print(e); // Allgemeiner Fehler
+       emit(ChangePasswordErrorState(message: e.toString()));
+     }
+   }
+ }
++//-------------------------------------------------------------------------
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/bloc/register_bloc/register_bloc.dart M1_abgabe/repo/apps/flutter/lib/bloc/register_bloc/register_bloc.dart
+--- a/apps/flutter/lib/bloc/register_bloc/register_bloc.dart	2025-04-08 09:42:26.000000000 +0200
++++ b/apps/flutter/lib/bloc/register_bloc/register_bloc.dart	2025-04-25 21:50:46.000000000 +0200
+@@ -8,30 +8,40 @@
+ 
+ class RegisterBloc extends Bloc<RegisterEvent, RegisterState> {
+   AuthRepo repo;
+-  // UserRepo userRepo = UserRepoImpl();
+ 
+   RegisterBloc({required this.repo}) : super(RegisterInitialState()) {
+-    on<RegisterSubmitEvent>(_onRegisterSubmitEvent);
+-    // on<InitUserEvent>(_onInitUser);
++    on<RegisterSubmitEvent>(
++        _onRegisterSubmitEvent); // aufruf von _onRegisterSubmitEvent Methode
+   }
++
++// _onRegisterSubmitEvent Methode --------------------------------------------------------------------------------------
++  // Diese Methode wird aufgerufen, wenn der Nutzer auf "Sign Up" klickt
+   _onRegisterSubmitEvent(
+       RegisterSubmitEvent event, Emitter<RegisterState> emit) async {
+     try {
++      // Zeigt Ladezustand während der Registrierung
+       emit(RegisterLoadingState(authModel: event.authModel));
++
++      // Sendet die Registrierungsdaten per POST-Request an das Backend (/api/users)
+       Response data = await repo.register(event.authModel);
+       print("register $data");
++
++      // Wenn die Antwort erfolgreich ist (Status 201), Registrierung abgeschlossen
+       if (data.statusCode == 201) {
+         emit(
+-          RegisterDoneState(msg: "User Created successfuly"),
++          RegisterDoneState(msg: "User Created successfully"),
+         );
+       } else {
++        // Fehlerbehandlung bei falscher Antwort
+         emit(RegisterErrorState(
+           msg: data.body,
+         ));
+       }
+     } on SocketException {
++      // Kein Internet vorhanden
+       emit(RegisterNoInternetState());
+     } catch (e) {
++      // Allgemeine Fehlerbehandlung
+       emit(
+         RegisterErrorState(
+           msg: e.toString(),
+@@ -39,6 +49,7 @@
+       );
+     }
+   }
++  //-------------------------------------------------------------------------------------
+ 
+   // _onInitUser(InitUserEvent event, Emitter<RegisterState> emit) async {
+   //   try {
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/config/constant.dart M1_abgabe/repo/apps/flutter/lib/config/constant.dart
+--- a/apps/flutter/lib/config/constant.dart	2025-04-08 09:42:26.000000000 +0200
++++ b/apps/flutter/lib/config/constant.dart	2025-04-25 21:50:46.000000000 +0200
+@@ -5,7 +5,11 @@
+ 
+   // static const WEBSITE_OF_THIS_APP = "https://demo.realworld.io/#/";
+ 
++  //---------------------------------
++  // Basis-URL für alle API-Aufrufe – zeigt auf das lokale Backend während der Entwicklung
+   /*#1*/ static const BASE_URL = "http://localhost:8081";
++  //---------------------------------
++
+   /*#2*/ static const SUB_URL = "";
+ 
+   /*#3*/ static const LOGIN = BASE_URL + SUB_URL + "/users/login";
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/ui/add_article/add_article_screen.dart M1_abgabe/repo/apps/flutter/lib/ui/add_article/add_article_screen.dart
+--- a/apps/flutter/lib/ui/add_article/add_article_screen.dart	2025-04-08 09:42:26.000000000 +0200
++++ b/apps/flutter/lib/ui/add_article/add_article_screen.dart	2025-04-25 21:50:46.000000000 +0200
+@@ -1,3 +1,4 @@
++// Imports für BLoC, Models, UI-Komponenten und Utilities
+ import 'package:conduit/bloc/article_bloc/article_bloc.dart';
+ import 'package:conduit/bloc/article_bloc/article_event.dart';
+ import 'package:conduit/bloc/article_bloc/article_state.dart';
+@@ -37,8 +38,6 @@
+   GlobalKey<FormState> _form = GlobalKey<FormState>();
+ 
+   bool isVisible = false;
+-  // String? title, aboutTitle, article;
+-  // String? apiSlug;
+   TextEditingController? titleCtr, aboutTitleCtr, articleCtr;
+   TextEditingController? tagsCtr;
+   late ArticleBloc articleBloc;
+@@ -47,15 +46,17 @@
+   bool isEdited = false;
+ 
+   bool isNoInternet = false;
++
+   @override
+   void initState() {
+     super.initState();
+ 
+     articleBloc = context.read<ArticleBloc>();
+ 
++    // Wenn der Nutzer sich auf der Update-Seite befindet, lade den vorhandenen Artikel
+     if (widget.isUpdateArticle) {
+       articleBloc.add(FetchArticleEvent(slug: widget.slug!));
+-      addData();
++      addData(); // Vordefinierte Daten einfügen
+     } else {
+       titleCtr = TextEditingController();
+       aboutTitleCtr = TextEditingController();
+@@ -64,13 +65,14 @@
+     tagsCtr = TextEditingController();
+   }
+ 
++  // Setzt bestehende Artikeldaten in die Eingabefelder
+   void addData() {
+     titleCtr = TextEditingController(text: articleModel?.article?.title);
+-    aboutTitleCtr =
+-        TextEditingController(text: articleModel?.article?.description);
++    aboutTitleCtr = TextEditingController(text: articleModel?.article?.description);
+     articleCtr = TextEditingController(text: articleModel?.article?.body);
+   }
+ 
++  // Leert alle Eingabefelder
+   void clear() {
+     setState(() {
+       titleCtr!.clear();
+@@ -80,6 +82,7 @@
+     });
+   }
+ 
++  // Fügt ein neues Tag hinzu
+   void addTag(String tag) {
+     print(tag);
+     setState(() {
+@@ -135,313 +138,127 @@
+                 behavior: NoGlow(),
+                 child: SingleChildScrollView(
+                   child: SafeArea(
+-                      child: BlocConsumer<ArticleBloc, ArticleState>(
+-                    listener: (context, state) {
+-                      if (state is ArticleLoadingState) {
+-                        CToast.instance.showLodingLoader(context);
+-                      }
+-                      if (state is ArticleNoInternetState) {
+-                        CToast.instance.dismiss();
+-                        CToast.instance.showError(context, NO_INTERNET);
+-                      }
+-                      // add article
+-                      if (state is ArticleAddSuccessState) {
+-                        clear();
+-                        CToast.instance.dismiss();
+-                        BaseScreen.switchTab(context, MyTabItem.globalfeed);
+-                        CToast.instance
+-                            .showSuccess(context, state.msg.toString());
+-                      }
+-                      if (state is ArticleAddErrorState) {
+-                        CToast.instance.dismiss();
+-                        CToast.instance
+-                            .showError(context, state.msg.toString());
+-                      }
+-
+-                      // update article
+-                      if (state is UpdateArticleSuccessState) {
+-                        CToast.instance.dismiss();
+-                        Navigator.pop(context, isEdited ? true : false);
+-                        // Navigator.popUntil(context, (route) => route.isFirst);
+-                        // Navigator.pushNamed(
+-                        //   context,
+-                        //   GlobalItemDetailScreen.globalItemDetailUrl,
+-                        //   arguments: {
+-                        //     'username': articleModel!.article!.author!.username,
+-                        //     'slug': articleModel!.article!.slug,
+-                        //   },
+-                        // );
+-                      }
+-                      if (state is ArticleLoadedState) {
+-                        articleModel = state.articleModel.last;
+-                        // title = state.articleModel.last.article?.title;
+-                        // aboutTitle =
+-                        //     state.articleModel.last.article?.description;
+-                        // article = state.articleModel.last.article?.body;
+-                        // apiSlug = state.articleModel.last.article!.slug;
+-                        tags = state.articleModel.last.article!.tagList!;
+-                        addData();
+-                        CToast.instance.dismiss();
+-                      }
+-                    },
+-                    builder: (context, state) {
+-                      return Form(
+-                        key: _form,
+-                        child: Container(
+-                          padding:
+-                              EdgeInsets.only(top: 20, right: 20, left: 20),
+-                          child: Column(
+-                            mainAxisAlignment: MainAxisAlignment.start,
+-                            crossAxisAlignment: CrossAxisAlignment.start,
+-                            children: [
+-                              SizedBox(
+-                                height: 20,
+-                              ),
+-                              Text(
+-                                "Title*",
+-                                style: TextStyle(
+-                                  fontFamily: ConduitFontFamily.robotoLight,
+-                                ),
+-                              ),
+-                              SizedBox(
+-                                height: 10,
+-                              ),
+-                              ConduitEditText(
+-                                controller: titleCtr,
+-                                maxLines: 1,
+-                                hint: "Article title",
+-                                textInputType: TextInputType.text,
+-                                inputFormatters: [
+-                                  LengthLimitingTextInputFormatter(150),
+-                                ],
+-                                validator: (value) {
+-                                  if (value == null || value.isEmpty) {
+-                                    return 'Enter a title';
+-                                  }
+-                                  return null;
+-                                },
+-                              ),
+-                              SizedBox(
+-                                height: 20,
+-                              ),
+-                              Text(
+-                                "About*",
+-                                style: TextStyle(
+-                                  fontFamily: ConduitFontFamily.robotoLight,
+-                                ),
+-                              ),
+-                              SizedBox(
+-                                height: 10,
+-                              ),
+-                              ConduitEditText(
+-                                controller: aboutTitleCtr,
+-                                hint: "About?",
+-                                maxLines: 2,
+-                                minLines: 1,
+-                                textInputType: TextInputType.text,
+-                                inputFormatters: [
+-                                  LengthLimitingTextInputFormatter(150)
+-                                ],
+-                                validator: (value) {
+-                                  if (value == null || value.isEmpty) {
+-                                    return "Enter article's about";
+-                                  }
+-                                  return null;
+-                                },
+-                              ),
+-                              SizedBox(
+-                                height: 20,
+-                              ),
+-                              Text(
+-                                "Your article*",
+-                                style: TextStyle(
+-                                  fontFamily: ConduitFontFamily.robotoLight,
+-                                ),
+-                              ),
+-                              SizedBox(
+-                                height: 10,
+-                              ),
+-                              ConduitEditText(
+-                                maxLines: 8,
+-                                minLines: 5,
+-                                controller: articleCtr,
+-                                hint: "Your article ( in markdown )",
+-                                textInputType: TextInputType.text,
+-                                validator: (value) {
+-                                  if (value == null || value.isEmpty) {
+-                                    return 'Please enter article';
+-                                  }
+-                                  return null;
+-                                },
+-                              ),
+-                              SizedBox(
+-                                height: 20,
+-                              ),
+-                              Visibility(
+-                                visible: isVisible,
+-                                child: Container(
+-                                  decoration: BoxDecoration(
+-                                      color: AppColors.white,
+-                                      border: Border.all(
+-                                          color: AppColors.primaryColor),
+-                                      borderRadius: BorderRadius.circular(10)),
+-                                  padding: EdgeInsets.all(10),
+-                                  child: Text(
+-                                    "1. Start typing the tag you want to create.\n\n"
+-                                    "2. After typing the tag, press the 'Done' or 'Next' button on your keyboard.\n\n"
+-                                    "3. The tag you typed will automatically be converted into a tag and added to the list of tags below the input field.\n\n"
+-                                    "4. You can continue typing and creating more tags using the same method.",
+-                                    style: TextStyle(
+-                                        fontFamily:
+-                                            ConduitFontFamily.robotoLight),
+-                                  ),
+-                                ),
+-                              ),
+-                              SizedBox(
+-                                height: 10,
+-                              ),
+-                              Text(
+-                                'Tags',
+-                                style: TextStyle(
+-                                  fontFamily: ConduitFontFamily.robotoLight,
+-                                ),
+-                              ),
+-                              SizedBox(
+-                                height: 10,
+-                              ),
+-                              ConduitEditText(
+-                                controller: tagsCtr,
+-                                hint: "Tags",
+-                                maxLines: 2,
+-                                minLines: 1,
+-                                textInputType: TextInputType.text,
+-                                inputFormatters: [
+-                                  FilteringTextInputFormatter.deny(" "),
+-                                  FilteringTextInputFormatter.allow(
+-                                    RegExp("[0-9a-z]"),
+-                                  ),
+-                                ],
+-                                onEditingComplete: () {
+-                                  final text = tagsCtr!.text.trim();
+-                                  if (text.isNotEmpty) {
+-                                    addTag(text);
+-                                    tagsCtr!.clear();
+-                                    print(tags);
+-                                  }
+-                                },
+-                                validator: (value) {
+-                                  if (value!.isEmpty && tags.isEmpty) {
+-                                    return "Write at least one tag";
+-                                  }
+-                                  return null;
+-                                },
+-                                suffixIcon: InkWell(
+-                                  onTap: () {
+-                                    setState(() {
+-                                      isVisible = !isVisible;
+-                                    });
+-                                  },
+-                                  child: Transform.scale(
+-                                    scale: 0.9,
+-                                    child: isVisible
+-                                        ? Icon(
+-                                            Icons.close,
+-                                            color: AppColors.pholder_background,
+-                                          )
+-                                        : Icon(
+-                                            Icons.info_outline,
+-                                            color: AppColors.pholder_background,
+-                                          ),
+-                                  ),
+-                                ),
+-                              ),
+-                              SizedBox(
+-                                height: 20,
+-                              ),
+-                              Wrap(
+-                                children: tags.map((tag) {
+-                                  return Padding(
+-                                    padding: const EdgeInsets.all(4.0),
+-                                    child: Chip(
+-                                      label: Text(tag),
+-                                      onDeleted: () {
+-                                        setState(() {
+-                                          tags.remove(tag);
+-                                        });
+-                                      },
+-                                    ),
+-                                  );
+-                                }).toList(),
+-                              ),
+-                              SizedBox(
+-                                width: MediaQuery.of(context).size.width,
+-                                child: CupertinoButton(
+-                                  color: AppColors.primaryColor,
+-                                  disabledColor: AppColors.text_color,
+-                                  borderRadius: BorderRadius.circular(10),
+-                                  onPressed: () {
+-                                    FocusManager.instance.primaryFocus!
+-                                        .unfocus();
+-                                    if (_form.currentState!.validate()) {
+-                                      print(tags);
+-                                      if (widget.isUpdateArticle) {
+-                                        setState(() {
+-                                          isEdited = true;
+-                                        });
+-                                        articleBloc.add(
+-                                          UpdateArticleEvent(
++                    child: BlocConsumer<ArticleBloc, ArticleState>(
++                      listener: (context, state) {
++                        if (state is ArticleLoadingState) {
++                          // Zeige Lade-Toast während der Operation
++                          CToast.instance.showLodingLoader(context);
++                        }
++                        if (state is ArticleNoInternetState) {
++                          // Fehleranzeige bei fehlender Internetverbindung
++                          CToast.instance.dismiss();
++                          CToast.instance.showError(context, NO_INTERNET);
++                        }
++                        // Erfolgreiches Erstellen eines Artikels
++                        if (state is ArticleAddSuccessState) {
++                          clear(); // Eingaben zurücksetzen
++                          CToast.instance.dismiss();
++                          BaseScreen.switchTab(context, MyTabItem.globalfeed); // Zurück zur Übersicht
++                          CToast.instance.showSuccess(context, state.msg.toString());
++                        }
++                        if (state is ArticleAddErrorState) {
++                          CToast.instance.dismiss();
++                          CToast.instance.showError(context, state.msg.toString());
++                        }
++
++                        // Erfolgreiches Update eines Artikels
++                        if (state is UpdateArticleSuccessState) {
++                          CToast.instance.dismiss();
++                          Navigator.pop(context, isEdited ? true : false);
++                        }
++                        // Geladene Artikeldaten setzen
++                        if (state is ArticleLoadedState) {
++                          articleModel = state.articleModel.last;
++                          tags = state.articleModel.last.article!.tagList!;
++                          addData(); // Eingaben füllen
++                          CToast.instance.dismiss();
++                        }
++                      },
++                      builder: (context, state) {
++                        return Form(
++                          key: _form,
++                          child: Container(
++                            padding: EdgeInsets.only(top: 20, right: 20, left: 20),
++                            child: Column(
++                              mainAxisAlignment: MainAxisAlignment.start,
++                              crossAxisAlignment: CrossAxisAlignment.start,
++                              children: [
++
++                                // Formularfelder: Titel, Beschreibung, Inhalt, Tags etc.
++
++                                // Beim Klick auf den Button wird geprüft,
++                                // ob das Formular gültig ist.
++                                // → Wenn ja, wird entweder ein SubmitArticleEvent (neu)
++                                // oder ein UpdateArticleEvent (bestehend) ausgelöst.
++                                // → Der BLoC verarbeitet das Event.
++                                // → Die API wird via POST-Request (/api/articles) aufgerufen.
++                                // → Backend speichert über CreateArticleAsync() den Artikel.
++                                // → Nach Erfolg wird zum Feed navigiert + Toast angezeigt.
++
++                                SizedBox(
++                                  width: MediaQuery.of(context).size.width,
++                                  child: CupertinoButton(
++                                    color: AppColors.primaryColor,
++                                    disabledColor: AppColors.text_color,
++                                    borderRadius: BorderRadius.circular(10),
++                                    onPressed: () {
++                                      FocusManager.instance.primaryFocus!.unfocus();
++                                      if (_form.currentState!.validate()) {
++                                        print(tags);
++                                        if (widget.isUpdateArticle) {
++                                          setState(() {
++                                            isEdited = true;
++                                          });
++                                          articleBloc.add(
++                                            UpdateArticleEvent(
+                                               articleModel: ArticleModel(
+                                                 article: Article(
+                                                   title: titleCtr!.text.trim(),
+-                                                  description: aboutTitleCtr!
+-                                                      .text
+-                                                      .trim(),
++                                                  description: aboutTitleCtr!.text.trim(),
+                                                   body: articleCtr!.text.trim(),
+                                                   tagList: tags,
+                                                 ),
+                                               ),
+-                                              slug:
+-                                                  articleModel!.article!.slug!),
+-                                        );
+-                                      } else {
+-                                        articleBloc.add(
+-                                          SubmitArticleEvent(
+-                                            articleModel: ArticleModel(
+-                                              article: Article(
+-                                                title: titleCtr!.text.trim(),
+-                                                description:
+-                                                    aboutTitleCtr!.text.trim(),
+-                                                body: articleCtr!.text.trim(),
+-                                                tagList: tags,
++                                              slug: articleModel!.article!.slug!,
++                                            ),
++                                          );
++                                        } else {
++                                          articleBloc.add(
++                                            SubmitArticleEvent(
++                                              articleModel: ArticleModel(
++                                                article: Article(
++                                                  title: titleCtr!.text.trim(),
++                                                  description: aboutTitleCtr!.text.trim(),
++                                                  body: articleCtr!.text.trim(),
++                                                  tagList: tags,
++                                                ),
+                                               ),
+                                             ),
+-                                          ),
+-                                        );
++                                          );
++                                        }
+                                       }
+-                                    }
+-                                  },
+-                                  child: Text(
+-                                    widget.isUpdateArticle
+-                                        ? "Update"
+-                                        : 'Publish Article',
+-                                    style: TextStyle(
+-                                      color: AppColors.white,
+-                                      fontWeight: FontWeight.bold,
+-                                      fontFamily:
+-                                          ConduitFontFamily.robotoRegular,
++                                    },
++                                    child: Text(
++                                      widget.isUpdateArticle ? "Update" : 'Publish Article',
++                                      style: TextStyle(
++                                        color: AppColors.white,
++                                        fontWeight: FontWeight.bold,
++                                        fontFamily: ConduitFontFamily.robotoRegular,
++                                      ),
+                                     ),
+                                   ),
+                                 ),
+-                              ),
+-                              SizedBox(
+-                                height: 20,
+-                              ),
+-                            ],
++
++                                SizedBox(
++                                  height: 20,
++                                ),
++                              ],
++                            ),
+                           ),
+-                        ),
+-                      );
+-                    },
+-                  )),
++                        );
++                      },
++                    ),
++                  ),
+                 ),
+               ),
+             ),
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/ui/comments/comments_screen.dart M1_abgabe/repo/apps/flutter/lib/ui/comments/comments_screen.dart
+--- a/apps/flutter/lib/ui/comments/comments_screen.dart	2025-04-08 09:42:26.000000000 +0200
++++ b/apps/flutter/lib/ui/comments/comments_screen.dart	2025-04-25 21:50:46.000000000 +0200
+@@ -42,6 +42,9 @@
+     addCommentBloc = context.read<AddCommentBloc>();
+ 
+     commentBloc = context.read<CommentBloc>();
++
++  // Beim Aufruf der CommentsScreen-Seite wird hier das Event ausgelöst
++  // Das sagt dem Bloc: Lade die Kommentare für den angegebenen Artikel (slug)
+     commentBloc.add(fetchCommentEvent(slug: widget.slug));
+   }
+ 
+@@ -90,6 +93,9 @@
+                         isWidget: true,
+                         onClickRetry: onRetryData,
+                       )
++
++                      // Der aktuelle Zustand der Kommentare wird hier im Bloc ausgewertet
++                      // CommentBloc liefert z. B. wird geladen, geladen, keine Kommentare
+                     : BlocConsumer<CommentBloc, CommentState>(
+                         listener: (context, state) {
+                           if (state is CommentNoInternetState) {
+@@ -105,10 +111,12 @@
+                           }
+                           if (state is DeleteCommentSuccessState) {
+                             CToast.instance.dismiss();
+-                            refreshComments();
++                            refreshComments(); // Nach Löschen: Kommentare neu laden
+                           }
+                         },
+                         builder: (context, state) {
++
++                          // Wenn keine Kommentare vorhanden sind, zeigen wir eine einfache Meldung.
+                           if (state is NoCommentState) {
+                             return Center(
+                               child: Text(
+@@ -119,6 +127,8 @@
+                               ),
+                             );
+                           }
++
++                          // Wenn gerade geladen wird, zeigen wir einen Ladebalken
+                           if (state is CommentLoadingState) {
+                             return Padding(
+                               padding: const EdgeInsets.all(10),
+@@ -129,6 +139,7 @@
+                             );
+                           }
+ 
++                          // Wenn Kommentare erfolgreich geladen wurden:
+                           if (state is CommentSuccessState) {
+                             return ScrollConfiguration(
+                               behavior: NoGlow(),
+@@ -140,6 +151,8 @@
+                                 scrollDirection: Axis.vertical,
+                                 itemCount: state.commentModel.length,
+                                 itemBuilder: (context, index) {
++                                  
++                                  // Jeder einzelne Kommentar wird mit einem eigenen Widget dargestellt
+                                   return CommentWidget(
+                                     slug: widget.slug,
+                                     commentModel: state.commentModel[index],
+@@ -154,6 +167,8 @@
+                               ),
+                             );
+                           }
++
++                          // Wenn nichts passt, zeigen wir einfach nichts
+                           return Container();
+                         },
+                       ),
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter_vs_vue.md M1_abgabe/repo/apps/flutter_vs_vue.md
+--- a/apps/flutter_vs_vue.md	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/flutter_vs_vue.md	2025-04-25 21:50:46.000000000 +0200
+@@ -0,0 +1,39 @@
++1. Artikel anlegen
++
++Vue.js nutzt eine komponentenbasierte Architektur mit Methoden wie
++onSubmit() und createArticle() direkt in der ArticleForm.vue. Die Daten
++werden aus einem Formular gesammelt und per POST-Request über eine
++zentrale API-Schicht (api.createArticle()) an das Backend gesendet. Die
++Steuerung erfolgt über einfache Methodenaufrufe, während die
++Weiterleitung zur Artikeldetailseite direkt in der Komponente passiert.
++
++Flutter hingegen verwendet das BLoC-Pattern. Hier wird durch das Drücken
++des \"Publish Article\"-Buttons ein SubmitArticleEvent ausgelöst, das
++vom ArticleBloc verarbeitet wird. Die Daten befinden sich in einem
++ArticleModel und werden über ein Repository (repo.createArticle(\...))
++an das Backend gesendet. Die UI reagiert auf Statusänderungen wie
++ArticleSuccessState, um z. B. Navigation oder Erfolgsmeldungen
++auszulösen.
++
++Hauptunterschiede: - Vue.js nutzt Methoden in Komponenten; Flutter nutzt
++Events, BLoC und States. - Navigation und Zustandsänderungen werden in
++Flutter über BlocConsumer und States gesteuert, in Vue.js direkt in der
++Methode.
++
++2. Nutzer anlegen (Sign Up)
++
++Vue.js verwendet im Sign-Up-Prozess den UserStore (Pinia oder Vuex), wo
++handleAuthAction(\'register\', userData) ausgeführt wird. Diese Methode
++ruft ein POST an /api/users auf. Das Formularhandling findet direkt in
++der Komponente statt, inklusive Fehleranzeige oder Weiterleitung.
++
++Flutter setzt ebenfalls auf das BLoC-Pattern. Hier wird ein
++RegisterSubmitEvent ausgelöst, der im RegisterBloc verarbeitet wird. Die
++Registrierung läuft über das Repository (repo.register(\...)), das den
++HTTP-Request sendet. Der UI-State wechselt zu RegisterDoneState, sobald
++der Server eine erfolgreiche Antwort liefert. Fehler oder
++Validierungsprobleme werden ebenfalls über States behandelt.
++
++Hauptunterschiede: - Vue.js verarbeitet alles direkt in der Komponente
++und im Store. - Flutter trennt die Logik durch Events, Blocs und
++Repositories -- stärker entkoppelt.
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/src/components/ArticleList.vue M1_abgabe/repo/apps/vue3/src/components/ArticleList.vue
+--- a/apps/vue3/src/components/ArticleList.vue	2025-04-08 09:42:26.000000000 +0200
++++ b/apps/vue3/src/components/ArticleList.vue	2025-04-25 21:50:46.000000000 +0200
+@@ -3,8 +3,13 @@
+ import api from '@/api'
+ import type { ArticleListProps } from '@/types'
+ 
++// Die Komponente erhält Filterparameter als Props (z. B. Tag, Autor, Favorit)
+ const props = defineProps<{ remoteParams: ArticleListProps }>()
++
++// Aktuelle Seite für die Paginierung
+ const articlesCurrent = ref(1)
++
++// Beim Laden der Komponente wird getArticles() automatisch ausgeführt
+ const {
+   state,
+   error,
+@@ -12,17 +17,20 @@
+   execute: getArticles,
+ } = useAsyncState(
+   async () => {
++    // Ruft Artikel mit Limit und Offset ab (z. B. /api/articles?limit=10&offset=0)
+     const params = { ...props.remoteParams, limit: 10, offset: (articlesCurrent.value - 1) * 10 }
+-
+     return await api.getArticles(params)
+   },
+-  { articles: [], articlesCount: 0 },
++  { articles: [], articlesCount: 0 }, // Initialer Zustand
+ )
++
++// Wird beim Seitenwechsel aufgerufen, um neue Artikel zu laden
+ function handleCurrentChang(value: number) {
+   articlesCurrent.value = value
+   getArticles()
+ }
+ 
++// Beobachtet Änderungen an den Filterparametern und lädt Artikel neu
+ watch(
+   () => props.remoteParams,
+   () => {
+@@ -42,7 +50,9 @@
+     No articles are here... yet.
+   </div>
+   <div v-else class="article-list">
++    <!-- Die geladenen Artikel werden als Vorschau-Komponente dargestellt -->
+     <article-preview v-for="(article, index) in state.articles" :key="index" :article="article" />
++    <!-- Paginierung: bei Seitenwechsel wird handleCurrentChang() ausgelöst -->
+     <article-pagination
+       :current="articlesCurrent"
+       :count="state.articlesCount"
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/src/components/AuthPage.vue M1_abgabe/repo/apps/vue3/src/components/AuthPage.vue
+--- a/apps/vue3/src/components/AuthPage.vue	2025-04-08 09:42:26.000000000 +0200
++++ b/apps/vue3/src/components/AuthPage.vue	2025-04-25 21:50:46.000000000 +0200
+@@ -8,20 +8,30 @@
+ const { handleAuthAction } = useUserStore()
+ const isRegister = (route.name as string) === 'Register'
+ const formStore = ref({ username: '', email: '', password: '' })
++// 2: onSubmit Methode-----------------------------------------------------------------
+ const { isLoading, execute: onSubmit } = useAsyncState(
++  // Diese Funktion wird aufgerufen, wenn das Formular abgeschickt wird
+   async () => {
+-    errors.value = {}
+-    return await handleAuthAction(route.name.toLowerCase(), { user: formStore.value })
++    errors.value = {} // Alte Fehlermeldungen zurücksetzen
++
++    // handleAuthAction() ruft entweder "Registrieren" oder "Login" auf,
++    // und sendet die Nutzerdaten an das Backend (/api/users oder /api/users/login)
++    return await handleAuthAction(route.name.toLowerCase(), { user: formStore.value }) // 3: aufruf von methode handleAuthAction aus useUserStore
+       .then(() => {
++        // Wenn alles erfolgreich war, wird der Nutzer zur Startseite weitergeleitet
+         router.push('/')
+       })
+       .catch((error) => {
++        // Wenn ein Fehler auftritt (z. B. ungültige Eingaben), werden die Fehlermeldungen gespeichert
+         errors.value = error.errors || {}
+       })
+   },
+-  null,
+-  { immediate: false },
++  null, // Kein Startwert nötig
++  { immediate: false }, // Die Funktion soll erst ausgeführt werden, wenn man onSubmit() aufruft (nicht sofort)
+ )
++//--------------------------------------------------------------------------------------
++
++
+ </script>
+ 
+ <template>
+@@ -38,7 +48,7 @@
+             </router-link>
+           </p>
+           <error-messages :errors="errors" />
+-          <form autocomplete="on" @submit.prevent="() => onSubmit()">
++          <form autocomplete="on" @submit.prevent="() => onSubmit()"> <!-- 1: Der Sign-Up-Button löst die Methode onSubmit() aus -->
+             <fieldset v-if="isRegister" class="form-group">
+               <input
+                 v-model="formStore.username" required type="text" name="username" placeholder="Your Name"
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/src/pages/article/components/ArticleForm.vue M1_abgabe/repo/apps/vue3/src/pages/article/components/ArticleForm.vue
+--- a/apps/vue3/src/pages/article/components/ArticleForm.vue	2025-04-08 09:42:26.000000000 +0200
++++ b/apps/vue3/src/pages/article/components/ArticleForm.vue	2025-04-25 21:50:46.000000000 +0200
+@@ -3,36 +3,50 @@
+ import type { RouteLocationNormalizedLoaded } from 'vue-router'
+ import api from '@/api'
+ 
++// Fehlerobjekt zur Anzeige von Validierungsfehlern
+ const errors = ref({})
+ const router = useRouter()
+ const tagList = ref<string[]>([])
++// Zugriff auf die aktuelle Route
+ const route = useRoute() as RouteLocationNormalizedLoaded
++// Prüft, ob der Benutzer sich auf der Seite zum Erstellen eines Artikels befindet
+ const isArticleCreate = route.name === 'ArticleCreate'
++
++// Formularzustand mit Eingabefeldern
+ const formStore = ref({
+   title: '',
+   description: '',
+   body: '',
+   tagList: '',
+ })
++
++// Lädt Artikeldaten, wenn ein bestehender Artikel bearbeitet wird
+ async function getArticle() {
+   const { article } = await api.getArticle(route.params.id as string)
+ 
++  // Setzt bestehende Werte ins Formular
+   tagList.value = article.tagList
+   formStore.value.body = article.body
+   formStore.value.description = article.description
+   formStore.value.title = article.title
+ }
++
++//3. Sendet einen neuen Artikel per HTTP POST an das Backend
+ function createArticle() {
+   return api.createArticle({
+     article: Object.assign({}, formStore.value, { tagList: tagList.value }),
+   })
+ }
++
++// Sendet Änderungen eines bestehenden Artikels per HTTP PUT an das Backend
+ function updateArticle() {
+   return api.updateArticle({
+     article: Object.assign({}, formStore.value, { tagList: tagList.value }),
+     slug: route.params.id as string,
+   })
+ }
++
++// Fügt bei Enter-Taste ein neues Tag hinzu, sofern es nicht leer oder doppelt ist
+ function onEnter() {
+   if (!formStore.value.tagList || tagList.value.includes(formStore.value.tagList))
+     return
+@@ -40,13 +54,18 @@
+   tagList.value.push(formStore.value.tagList)
+   formStore.value.tagList = ''
+ }
++
++//1. Beim Klick auf "Publish Article" wird diese Funktion "onSubmit" aufgerufen
++//2. Sie entscheidet je nach Route, ob ein Artikel erstellt oder bearbeitet wird
+ const { isLoading, execute: onSubmit } = useAsyncState(
+   async () => {
+     return (isArticleCreate ? createArticle() : updateArticle())
+       .then(({ article }) => {
++        // Leitet nach erfolgreicher Speicherung zur Artikeldetailseite weiter
+         router.push(`/article/${article.slug}`)
+       })
+       .catch((error) => {
++        // Zeigt etwaige Validierungsfehler an
+         errors.value = error.errors || {}
+       })
+   },
+@@ -55,7 +74,8 @@
+     immediate: false,
+   },
+ )
+-
++//----------------------------------------------------------------------------------------------------------------
++// Beim Laden der Komponente: Wenn kein neuer Artikel erstellt wird, lade bestehende Daten
+ onMounted(() => {
+   if (!isArticleCreate)
+     getArticle()
+@@ -67,32 +87,39 @@
+     <div class="container page">
+       <div class="row">
+         <div class="col-md-10 offset-md-1 col-xs-12">
++          <!-- Komponente zur Fehleranzeige -->
+           <error-messages :errors="errors" />
++          <!-- Formular zur Erstellung/Bearbeitung eines Artikels -->
+           <form autocomplete="on" @submit.prevent="() => onSubmit()">
+             <fieldset>
++              <!-- Titel-Eingabefeld -->
+               <fieldset class="form-group">
+                 <input
+                   v-model="formStore.title" required type="text" name="title" placeholder="Article Title"
+                   class="form-control form-control-lg"
+                 >
+               </fieldset>
++              <!-- Beschreibung -->
+               <fieldset class="form-group">
+                 <input
+                   v-model="formStore.description" required type="text" name="description" class="form-control"
+                   placeholder="What's this article about?"
+                 >
+               </fieldset>
++              <!-- Artikelinhalt -->
+               <fieldset class="form-group">
+                 <textarea
+                   v-model="formStore.body" rows="8" required name="body" class="form-control"
+                   placeholder="Write your article (in markdown)"
+                 />
+               </fieldset>
++              <!-- Tags -->
+               <fieldset class="form-group">
+                 <input
+                   v-model="formStore.tagList" type="text" name="tagList" class="form-control"
+                   placeholder="Enter tags" @keydown.enter.prevent="onEnter"
+                 >
++                <!-- Darstellung der Tag-Liste -->
+                 <div class="tag-list">
+                   <span v-for="(tag, index) in tagList" :key="tag" class="tag-default tag-pill">
+                     <i class="ion-close-round" @click="tagList.splice(index, 1)" />
+@@ -100,6 +127,7 @@
+                   </span>
+                 </div>
+               </fieldset>
++              <!-- "Publish Article"-Button -->
+               <button type="submit" :disabled="isLoading" class="btn btn-lg pull-xs-right btn-primary">
+                 Publish Article
+               </button>
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/src/pages/article/components/CommentList.vue M1_abgabe/repo/apps/vue3/src/pages/article/components/CommentList.vue
+--- a/apps/vue3/src/pages/article/components/CommentList.vue	2025-04-08 09:42:26.000000000 +0200
++++ b/apps/vue3/src/pages/article/components/CommentList.vue	2025-04-25 21:50:46.000000000 +0200
+@@ -14,11 +14,18 @@
+ function isAuthor(username: string) {
+   return store.userInfo?.username === username
+ }
++
++//-----------------------------
++
++// 2. Die Methode getComments() ruft alle Kommentare vom Backend ab (über die API)
+ async function getComments() {
+-  const res = await api.getComments(route.params.id as string)
++  const res = await api.getComments(route.params.id as string) // slug = Artikel-ID aus der Route
+ 
+-  comments.value = res.comments
++  comments.value = res.comments  // speichert die geladenen Kommentare im comments-Array
+ }
++
++//----------------------------
++
+ const { isLoading, execute: onSubmit } = useAsyncState(
+   async () => {
+     return await api
+@@ -39,9 +46,16 @@
+   getComments()
+ }
+ 
++//----------------------------
++
++// 1. Beim Aufrufen der Artikeldetailseite wird automatisch getComments() aufgerufen
+ onMounted(() => {
+   getComments()
+ })
++
++//----------------------------
++
++
+ </script>
+ 
+ <template>
+@@ -59,10 +73,13 @@
+         </div>
+       </form>
+ 
++
++      <!-- 3. Die Kommentare werden im Template mit v-for dargestellt -->
++
+       <div v-for="(comment, index) in comments" :key="index" class="card">
+         <div class="card-block">
+           <p class="card-text">
+-            {{ comment.body }}
++            {{ comment.body }}  <!-- Kommentartext anzeigen -->
+           </p>
+         </div>
+         <div class="card-footer">
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/src/pages/settings/index.vue M1_abgabe/repo/apps/vue3/src/pages/settings/index.vue
+--- a/apps/vue3/src/pages/settings/index.vue	2025-04-08 09:42:26.000000000 +0200
++++ b/apps/vue3/src/pages/settings/index.vue	2025-04-25 21:50:46.000000000 +0200
+@@ -4,8 +4,11 @@
+ import type { UserInfo } from '@/types'
+ import { useUserStore } from '@/stores/useUserStore'
+ 
++// Zugriff auf Router und UserStore
+ const router = useRouter()
+ const store = useUserStore()
++
++// Lokales Formularmodell für Profildaten
+ const fromStore = ref<UserInfo>({
+   image: '',
+   username: '',
+@@ -13,22 +16,34 @@
+   email: '',
+   password: '',
+ })
++//------ onSubmit Methose ---------------------------------------------------------------------------------------
++// Diese Methode wird aufgerufen, wenn der Nutzer auf „Update Settings“ klickt
+ const { isLoading, execute: onSubmit } = useAsyncState(
+   async () => {
++    // Sendet einen PUT-Request an /api/user mit den eingegebenen Profildaten
+     return await api.updateUser({ user: fromStore.value }).then(({ user }) => {
++      // Speichert die neue Benutzerinfo im Store
+       store.userInfo = user
++      // Leitet den Nutzer nach erfolgreicher Aktualisierung zurück auf sein Profil
+       router.push(`/profile/${user.username}`)
+     })
+   },
+   null,
+   { immediate: false },
+ )
++//-----------------------------------------------------------------------------------------------
++
++// Funktion für Logout
+ function onLogout() {
++  // Benutzerinfo im Store zurücksetzen
+   store.userInfo = null
++  // Token aus localStorage entfernen
+   localStorage.removeItem('jwt-token')
++  // Zur Startseite weiterleiten
+   router.push('/')
+ }
+ 
++// Beim Laden der Seite werden die aktuellen Daten des Benutzers in das Formular übernommen
+ onMounted(() => {
+   if (store.userInfo) {
+     fromStore.value = { ...fromStore.value, ...store.userInfo }
+@@ -44,38 +59,54 @@
+           <h1 class="text-xs-center">
+             Your Settings
+           </h1>
++
++          <!-- Formular für Profildaten -->
+           <form autocomplete="on" @submit.prevent="() => onSubmit()">
+             <fieldset>
++              <!-- Profilbild -->
+               <fieldset class="form-group">
+                 <input v-model="fromStore.image" type="text" class="form-control" placeholder="URL of profile picture">
+               </fieldset>
++
++              <!-- Benutzername -->
+               <fieldset class="form-group">
+                 <input
+                   v-model="fromStore.username" type="text" placeholder="Your Name"
+                   class="form-control form-control-lg"
+                 >
+               </fieldset>
++
++              <!-- Kurzbiografie -->
+               <fieldset class="form-group">
+                 <textarea
+                   v-model="fromStore.bio" rows="8" placeholder="Short bio about you"
+                   class="form-control form-control-lg"
+                 />
+               </fieldset>
++
++              <!-- E-Mail -->
+               <fieldset class="form-group">
+                 <input v-model="fromStore.email" type="text" placeholder="Email" class="form-control form-control-lg">
+               </fieldset>
++
++              <!-- Neues Passwort -->
+               <fieldset class="form-group">
+                 <input
+                   v-model="fromStore.password" type="password" placeholder="New Password"
+                   class="form-control form-control-lg"
+                 >
+               </fieldset>
++
++              <!-- Button zum Absenden -->
+               <button class="btn btn-lg btn-primary pull-xs-right" :disabled="isLoading">
+                 Update Settings
+               </button>
+             </fieldset>
+           </form>
++
+           <hr>
++
++          <!-- Logout-Button -->
+           <button class="btn btn-outline-danger" @click="onLogout">
+             Or click here to logout.
+           </button>
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/src/stores/useUserStore.ts M1_abgabe/repo/apps/vue3/src/stores/useUserStore.ts
+--- a/apps/vue3/src/stores/useUserStore.ts	2025-04-08 09:42:26.000000000 +0200
++++ b/apps/vue3/src/stores/useUserStore.ts	2025-04-25 21:50:46.000000000 +0200
+@@ -8,11 +8,17 @@
+     userInfo.value = user
+     localStorage.setItem('jwt-token', user.token!)
+   }
+-  const handleAuthAction = async (type: string, formStore: { user: User }) => {
+-    const { user } = type === 'register' ? await api.register(formStore) : await api.login(formStore)
+ 
+-    updateUserInfo(user)
+-  }
++//---- handleAuthAction() Methode -------------
++//Je nach type („register“ oder „login“) sendet sie die Nutzerdaten an das Backend,
++//bekommt eine Antwort mit dem Benutzer + Token und speichert diese im UserStore.
++const handleAuthAction = async (type: string, formStore: { user: User }) => {
++  const { user } = type === 'register' ? await api.register(formStore) : await api.login(formStore)
++  updateUserInfo(user)
++}
++//---------------------------------------------
++
++
+   const getUserInfo = async () => {
+     const { user } = await api.getUserInfo()
+ 
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/vite.config.ts M1_abgabe/repo/apps/vue3/vite.config.ts
+--- a/apps/vue3/vite.config.ts	2025-04-08 09:42:26.000000000 +0200
++++ b/apps/vue3/vite.config.ts	2025-04-25 21:50:46.000000000 +0200
+@@ -23,6 +23,13 @@
+   server: {
+     host: false,
+     open: true,
++
++
++    
++    //-----------------------------
++    //  Dieser Block sorgt dafür, dass während der
++    // Entwicklung alle Frontend-Anfragen, die mit /api 
++    // beginnen, an das Backend unter http://localhost:8081 weitergeleitet werden.
+     proxy: {
+       '/api': {
+         changeOrigin: true,
+@@ -30,6 +37,7 @@
+         rewrite: path => path.replace(/^\/api/, ''),
+       },
+     },
++    //-----------------------------
+   },
+   resolve: {
+     alias: {
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/data_generator/create_articles.py M1_abgabe/repo/data_generator/create_articles.py
+--- a/data_generator/create_articles.py	1970-01-01 01:00:00.000000000 +0100
++++ b/data_generator/create_articles.py	2025-04-25 21:50:46.000000000 +0200
+@@ -0,0 +1,54 @@
++import requests
++import random
++import lorem
++
++# Basis-URL der API
++API_BASE = "http://localhost:8081/api"
++
++# Lade Benutzer-Tokens aus der vorher gespeicherten Datei
++with open("test_tokens.txt", "r") as f:
++    user_tokens = [line.strip().split(",") for line in f.readlines()]
++
++# Liste von Tags
++tags_pool = ["tech", "life", "dev", "open-source", "fun", "science", "flutter", "vue", "ai", "dotnet"]
++
++# Schleife, um 200 Artikel zu erstellen
++for i in range(200):
++
++    # Wähle zufällig einen Benutzer, der den Artikel erstellt
++    username, token = random.choice(user_tokens)
++
++     # Titel, Beschreibung und Text des Artikels zufällig generieren
++    title = f"Testartikel Nr. {i+1}"
++    description = lorem.sentence()
++    body = lorem.paragraph()
++    tags = random.sample(tags_pool, random.randint(3, 4))    # Wähle 3 bis 4 zufällige Tags aus der Tag-Liste
++
++    # Erstelle Header mit dem Token des Benutzers zur Authentifizierung
++
++    # Header mit Authentifizierung (Token)
++    headers = {
++        "Authorization": f"Token {token}",
++        "Content-Type": "application/json"
++    }
++    
++    # Zusammenstellung der Artikeldaten
++    payload = {
++        "article": {
++            "title": title,
++            "description": description,
++            "body": body,
++            "tagList": tags
++        }
++    }
++
++    # Sende POST-Anfrage zur Erstellung des Artikels
++    r = requests.post(f"{API_BASE}/articles", json=payload, headers=headers)
++
++    # Erfolgs- oder Fehlermeldung in der Konsole ausgeben
++    if r.status_code == 200:
++        print(f" Artikel {i+1} erfolgreich erstellt")
++    else:
++        print(f" Fehler bei Artikel {i+1}: {r.status_code}")
++
++print(" Artikel-Erstellung abgeschlossen!")
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/data_generator/create_users.py M1_abgabe/repo/data_generator/create_users.py
+--- a/data_generator/create_users.py	1970-01-01 01:00:00.000000000 +0100
++++ b/data_generator/create_users.py	2025-04-25 21:50:46.000000000 +0200
+@@ -0,0 +1,62 @@
++import requests
++import time
++
++# Basis-URL der API
++API_BASE = "http://localhost:8081/api"
++
++# Listen zur Speicherung der Benutzernamen und Tokens
++users = []
++tokens = []
++
++# Zeitstempel wird zur Namensgebung genutzt, um Duplikate zu vermeiden
++timestamp = int(time.time())
++
++# Schleife zur Erstellung von 20 Testbenutzern
++for i in range(1, 21):
++    # Einzigartigen Benutzernamen mit Index und Zeitstempel erstellen
++    username = f"user{i}_{timestamp}"
++    email = f"{username}@example.com"
++    password = "Test123"  # Standard-Passwort für alle Testbenutzer
++
++    # Anfrage zum Registrieren des Benutzers senden
++    r = requests.post(f"{API_BASE}/users", json={
++        "user": {
++            "username": username,
++            "email": email,
++            "password": password
++        }
++    })
++
++    # Überprüfen, ob die Registrierung erfolgreich war
++    if r.status_code == 200:
++        print(f"Nutzer {username} erstellt")
++    else:
++        print(f"Fehler bei {username}: {r.status_code}")
++        continue    # Bei Fehler: überspringen und nächsten Nutzer versuchen
++
++    # Login durchführen, um Token zu erhalten
++    login = requests.post(f"{API_BASE}/users/login", json={
++        "user": {
++            "email": email,
++            "password": password
++        }
++    })
++
++    # Überprüfen, ob der Login erfolgreich war
++    if login.status_code == 200:
++        # Token aus der Login-Antwort extrahieren
++        token = login.json()['user']['token']
++        
++        # Benutzerdaten und Token in Listen speichern
++        tokens.append(token)
++        users.append(username)
++        print(f"Token gespeichert für {username}")
++    else:
++        print(f"Login fehlgeschlagen für {username}")
++
++# Alle Benutzer + Tokens in Datei speichern für spätere Nutzung
++with open("test_tokens.txt", "w") as f:
++    for i in range(len(users)):
++        f.write(f"{users[i]},{tokens[i]}\n")
++
++print("Alle Tokens wurden gespeichert in test_tokens.txt")
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/data_generator/follow.py M1_abgabe/repo/data_generator/follow.py
+--- a/data_generator/follow.py	1970-01-01 01:00:00.000000000 +0100
++++ b/data_generator/follow.py	2025-04-25 21:50:46.000000000 +0200
+@@ -0,0 +1,41 @@
++import requests
++import random
++
++# Basis-URL der API
++API_BASE = "http://localhost:8081/api"
++
++# Lade Benutzer-Tokens aus der vorher gespeicherten Datei
++with open("test_tokens.txt", "r") as f:
++    user_tokens = [line.strip().split(",") for line in f.readlines()]
++
++# Wähle 5 zufällige Nutzer aus, die anderen Nutzern folgen sollen
++followers = random.sample(user_tokens, 5)
++
++# Für jeden dieser 5 Nutzer
++for follower_name, follower_token in followers:
++    # Wähle 1 bis 3 andere Nutzer aus, denen gefolgt werden soll (ausschließlich andere)
++    other_users = [u for u in user_tokens if u[0] != follower_name]
++    followees = random.sample(other_users, random.randint(1, 3))
++
++    print(f"{follower_name} folgt: {[f[0] for f in followees]}")
++
++
++    # Sende für jeden ausgewählten Nutzer eine Follow-Anfrage
++    for followee_name, _ in followees:
++        
++        # Header mit Authentifizierung (Token)
++        headers = {
++            "Authorization": f"Token {follower_token}",
++            "Content-Type": "application/json"
++        }
++
++        # Sende POST-Anfrage an das Backend, um Follow-Beziehung zu erstellen
++        res = requests.post(f"{API_BASE}/profiles/{followee_name}/follow", headers=headers)
++        
++        # Überprüfe, ob die Anfrage erfolgreich war
++        if res.status_code == 200:
++            print(f"  folgt {followee_name}")
++        else:
++            print(f"  Fehler beim Folgen von {followee_name}: {res.status_code}")
++
++print("Alle Follower-Beziehungen erstellt")
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/data_generator/kommentare.py M1_abgabe/repo/data_generator/kommentare.py
+--- a/data_generator/kommentare.py	1970-01-01 01:00:00.000000000 +0100
++++ b/data_generator/kommentare.py	2025-04-25 21:50:46.000000000 +0200
+@@ -0,0 +1,52 @@
++import requests
++import random
++import lorem
++
++API_BASE = "http://localhost:8081/api"
++
++# Lade Benutzer-Tokens aus der vorher gespeicherten Datei
++with open("test_tokens.txt", "r") as f:
++    user_tokens = [line.strip().split(",") for line in f.readlines()]
++
++# Rufe alle Artikel vom Backend ab (maximal 200)
++r = requests.get(f"{API_BASE}/articles?limit=200")
++articles = r.json().get("articles", [])
++
++
++# Wähle zufällig 20 Artikel aus, die kommentiert werden sollen
++articles_to_comment = random.sample(articles, 20)
++
++
++# Durchlaufe alle ausgewählten Artikel
++for article in articles_to_comment:
++    slug = article["slug"]  # Eindeutiger Bezeichner des Artikels
++    comment_count = random.randint(1, 3) # Anzahl der Kommentare für diesen Artikel (zwischen 1 und 3)
++
++    # Erzeuge Kommentare für jeden Artikel
++    for _ in range(comment_count):
++        comment_text = lorem.sentence() # Erzeuge zufälligen Text als Kommentar
++        _, token = random.choice(user_tokens)  # Wähle zufälligen Benutzer aus
++        
++        # Header mit Authentifizierung (Token)
++        headers = {
++            "Authorization": f"Token {token}",
++            "Content-Type": "application/json"
++        }
++
++        # Kommentarinhalt im richtigen Format
++        payload = {
++            "comment": {
++                "body": comment_text
++            }
++        }
++
++        # Sende POST-Anfrage zum Hinzufügen des Kommentars
++        res = requests.post(f"{API_BASE}/articles/{slug}/comments", json=payload, headers=headers)
++        
++        # Überprüfe, ob das Kommentieren erfolgreich war        
++        if res.status_code == 200:
++            print("Kommentar erfolgreich gepostet")
++        else:
++            print(f"Fehler beim Kommentieren: {res.status_code}")
++
++print("Alle Kommentare erstellt")
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/data_generator/like_articles.py M1_abgabe/repo/data_generator/like_articles.py
+--- a/data_generator/like_articles.py	1970-01-01 01:00:00.000000000 +0100
++++ b/data_generator/like_articles.py	2025-04-25 21:50:46.000000000 +0200
+@@ -0,0 +1,48 @@
++# Teil 3: 50 zufällige Artikel liken
++
++import requests
++import random
++
++# Basis-URL der API
++API_BASE = "http://localhost:8081/api"
++
++# Lade Benutzer-Tokens aus der vorher gespeicherten Datei
++with open("test_tokens.txt", "r") as f:
++    user_tokens = [line.strip().split(",") for line in f.readlines()]
++
++# Rufe alle Artikel vom Backend ab (maximal 200)
++r = requests.get(f"{API_BASE}/articles?limit=200")
++articles = r.json().get("articles", [])
++
++# Gib die Anzahl der gefundenen Artikel aus
++print(f"{len(articles)} Artikel gefunden")
++
++# Wähle zufällig 50 Artikel aus, die geliked werden sollen
++articles_to_like = random.sample(articles, 50)
++
++# Durchlaufe alle ausgewählten Artikel
++for article in articles_to_like:
++    slug = article["slug"]  # Eindeutiger Bezeichner des Artikels
++    like_count = random.randint(1, 5)   # Anzahl der Likes (zwischen 1 und 5)
++    print(f"{slug} wird {like_count} mal geliked")
++
++    # Liken durch zufällige Nutzer
++    for _ in range(like_count):
++        _, token = random.choice(user_tokens) # Wähle zufälliges Token aus
++
++        # Header mit Authentifizierung (Token)
++        headers = {
++            "Authorization": f"Token {token}",
++            "Content-Type": "application/json"
++        }
++
++        # Sende POST-Anfrage, um den Artikel zu liken
++        res = requests.post(f"{API_BASE}/articles/{slug}/favorite", headers=headers)
++        
++        # Überprüfe, ob der Like erfolgreich war
++        if res.status_code == 200:
++            print("Like erfolgreich")
++        else:
++            print(f"Fehler beim Liken: {res.status_code}")
++
++print("Alle Likes wurden vergeben")
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github "a/docs/diagramme/Level 1 Context-Diagramm.wsd" "M1_abgabe/repo/docs/diagramme/Level 1 Context-Diagramm.wsd"
+--- "a/docs/diagramme/Level 1 Context-Diagramm.wsd"	1970-01-01 01:00:00.000000000 +0100
++++ "a/docs/diagramme/Level 1 Context-Diagramm.wsd"	2025-04-25 21:50:46.000000000 +0200
+@@ -0,0 +1,16 @@
++@startuml
++!includeurl https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
++
++Person(user, "Benutzer", "Verfasst Artikel, liest Inhalte und verwaltet sein Profil")
++
++System(conduit, "Conduit Platform", "Artikelverwaltung und soziale Interaktion")
++
++Rel(user, conduit, "Nutzt über Browser oder App", "HTTPS")
++@enduml
++
++
++/' 
++  Dieses Diagramm zeigt, dass ein Benutzer die Conduit-Plattform nutzt, um Artikel zu verwalten und mit anderen zu interagieren
++  Der Zugriff erfolgt über Web oder App und die Verbindung läuft über HTTPS
++'/
++
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github "a/docs/diagramme/Level 2 Container-Diagramm.wsd" "M1_abgabe/repo/docs/diagramme/Level 2 Container-Diagramm.wsd"
+--- "a/docs/diagramme/Level 2 Container-Diagramm.wsd"	1970-01-01 01:00:00.000000000 +0100
++++ "a/docs/diagramme/Level 2 Container-Diagramm.wsd"	2025-04-25 21:50:46.000000000 +0200
+@@ -0,0 +1,29 @@
++@startuml
++!includeurl https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
++
++Person(user, "Benutzer", "Verfasst Artikel, liest Inhalte und verwaltet sein Profil")
++
++System_Boundary(conduit, "Conduit System") {
++    Container(webApp, "Vue.js Web App", "JavaScript (Vue.js)", "Frontend im Browser zur Nutzung von Conduit")
++    Container(mobileApp, "Flutter Mobile App", "Dart (Flutter)", "Mobiles Frontend für Android/iOS")
++    Container(api, "ASP.NET Core Backend", "C# .NET", "Stellt die REST API für Artikel, Nutzer und Kommentare bereit")
++    ContainerDb(database, "SQLite Datenbank", "SQL", "Speichert Nutzer, Artikel, Kommentare und Tags")
++}
++
++Rel(user, webApp, "Verwendet über den Browser")
++Rel(user, mobileApp, "Verwendet über die mobile App")
++
++Rel(webApp, api, "Kommuniziert mit", "REST API (JSON)")
++Rel(mobileApp, api, "Kommuniziert mit", "REST API (JSON)")
++
++Rel(api, database, "Liest & schreibt", "SQL")
++@enduml
++
++
++
++/' 
++
++Dieses Diagramm zeigt, dass der Benutzer über die Web-App (Vue.js) oder die mobile App (Flutter) mit dem Conduit-System arbeitet, beide Frontends senden Anfragen an das ASP.NET Core 
++Backend, das über eine REST-API kommuniziert. Das Backend speichert alle Daten wie Artikel und Kommentare in einer SQLite-Datenbank
++
++'/
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github "a/docs/diagramme/Level 3 Component-Diagramm_Backend.wsd" "M1_abgabe/repo/docs/diagramme/Level 3 Component-Diagramm_Backend.wsd"
+--- "a/docs/diagramme/Level 3 Component-Diagramm_Backend.wsd"	1970-01-01 01:00:00.000000000 +0100
++++ "a/docs/diagramme/Level 3 Component-Diagramm_Backend.wsd"	2025-04-25 21:50:46.000000000 +0200
+@@ -0,0 +1,27 @@
++@startuml
++!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
++
++Container_Boundary(backend, "ASP.NET Core Backend") {
++
++  Component(Api, "API Layer", "Controllers + DTOs", "Stellt HTTP-Endpunkte für das Frontend bereit (REST-API)")
++  Component(Core, "Core Layer", "Logik + Interfaces", "Beinhaltet Entitäten, Interfaces, und Anwendungslogik")
++  Component(Data, "Data Layer", "DB-Kontext + Repositories", "Zuständig für Datenzugriff über Entity Framework")
++  Component(Infrastructure, "Infrastructure Layer", "Service-Implementierungen", "Technische Details, z. B. Dateidienste")
++}
++
++Rel(Api, Core, "verwendet Application-Services und Interfaces")
++Rel(Api, Data, "nutzt Repositories über Core-Interfaces")
++Rel(Core, Infrastructure, "wird durch konkrete Services implementiert")
++Rel(Data, Core, "implementiert Repository-Interfaces")
++@enduml
++
++
++/' 
++
++Das Diagramm zeigt, wie das ASP.NET Core Backend in Schichten aufgebaut ist
++Ganz außen liegt die API-Schicht, sie stellt die HTTP-Endpunkte bereit, über die die Frontends mit dem System kommunizieren
++Die API-Schicht nutzt die Core-Schicht, die die Geschäftslogik und wichtige Schnittstellen enthält
++Die Daten werden über die Data-Schicht verwaltet, sie enthält den Datenbankzugriff (z. B. über Entity Framework) und implementiert die Schnittstellen aus der Core-Schicht
++Die Infrastructure-Schicht enthält technische Details wie Dienste zur Datei- oder Tokenverwaltung und wird von der Core-Schicht verwendet
++
++'/
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github "a/docs/diagramme/Level 3 Component-Diagramm_Flutter.wsd" "M1_abgabe/repo/docs/diagramme/Level 3 Component-Diagramm_Flutter.wsd"
+--- "a/docs/diagramme/Level 3 Component-Diagramm_Flutter.wsd"	1970-01-01 01:00:00.000000000 +0100
++++ "a/docs/diagramme/Level 3 Component-Diagramm_Flutter.wsd"	2025-04-25 21:50:46.000000000 +0200
+@@ -0,0 +1,39 @@
++@startuml
++!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
++
++Container_Boundary(flutterApp, "Flutter Frontend") {
++  
++  Component(main, "main.dart", "App Entry Point", "Startpunkt der Flutter-App, initialisiert Routing und Theme")
++  Component(ui, "UI", "Screens", "Alle Seitenansichten der App")
++  Component(widget, "Widgets", "Wiederverwendbare UI-Komponenten")
++  Component(bloc, "BLoC", "State Management", "Verwaltet UI-Status und Logik")
++  Component(model, "Modelle", "Datendefinition", "Datenmodelle wie User, Artikel etc.")
++  Component(services, "Services", "API-Zugriffe", "Kommunikation mit dem Backend über HTTP")
++  Component(repository, "Repository", "Datenzugriffslogik", "Fasst Services zusammen für BLoCs")
++  Component(navigator, "Navigator", "Routing", "Seitenwechsel-Logik")
++  Component(utils, "Utils", "Hilfsmethoden", "Hilfsfunktionen für Formatierung, Validierung etc.")
++  Component(config, "Config", "Konfiguration", "App-Einstellungen, Farben, Themes etc.")
++}
++
++Rel(main, config, "nutzt")
++Rel(main, navigator, "initialisiert Routing")
++Rel(main, ui, "startet Screens")
++Rel(ui, bloc, "kommuniziert mit")
++Rel(bloc, repository, "fragt Daten ab")
++Rel(repository, services, "nutzt HTTP-Zugriff")
++Rel(services, model, "serialisiert Daten")
++Rel(ui, widget, "verwendet wiederverwendbare Widgets")
++Rel(ui, utils, "nutzt Hilfsfunktionen")
++Rel(bloc, model, "verwendet Datenmodelle")
++@enduml
++
++
++/' 
++
++Das Diagramm zeigt die innere Struktur der Flutter-App. Die App startet mit main.dart, wo Konfigurationen geladen und die Navigation eingerichtet werden
++Die Benutzeroberfläche besteht aus verschiedenen Screens (UI), die mit wiederverwendbaren Widgets gebaut sind
++Die App-Logik läuft über den BLoC, der Nutzeraktionen verarbeitet und den Zustand der App steuert
++Der BLoC spricht mit dem Repository, das die Daten organisiert und über die Services per HTTP mit dem Backend kommuniziert
++Modelle definieren die Datenstruktur (z. B. Artikel), und Utils enthalten Hilfsfunktionen und einstellungen wie Farben und Themes werden in Config verwaltet
++
++'/
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github "a/docs/diagramme/Level 3 Component-Diagramm_Vue.wsd" "M1_abgabe/repo/docs/diagramme/Level 3 Component-Diagramm_Vue.wsd"
+--- "a/docs/diagramme/Level 3 Component-Diagramm_Vue.wsd"	1970-01-01 01:00:00.000000000 +0100
++++ "a/docs/diagramme/Level 3 Component-Diagramm_Vue.wsd"	2025-04-25 21:50:46.000000000 +0200
+@@ -0,0 +1,41 @@
++@startuml
++!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
++
++Container_Boundary(vueApp, "Vue 3 Frontend") {
++
++  Component(main, "main.ts", "Einstiegspunkt", "Initialisiert App, Store, Router")
++  Component(app, "App.vue", "Haupt-Komponente", "Beinhaltet RouterView und grundlegendes Layout")
++  Component(pages, "Pages", "Seitenansichten", "Konkrete Seiten wie Login, Home, Article ")
++  Component(components, "Components", "UI-Bausteine", "Wiederverwendbare UI-Komponenten")
++  Component(layouts, "Layouts", "Seitenrahmen", "Struktur mit Header/Footer ")
++  Component(router, "Router", "Navigation", "Definiert Routen und deren Zuordnung")
++  Component(stores, "Stores", "State Management", "App-Zustand über Pinia/Vue verwaltet")
++  Component(api, "API", "Backend-Zugriff", "Kommunikation mit Backend per HTTP")
++  Component(types, "Types", "Typdefinitionen", "Interfaces, z. B. für TypeScript")
++  Component(utils, "Utils", "Hilfsfunktionen", "z. B. Formatierungen, Validierungen")
++}
++
++Rel(main, app, "mountet")
++Rel(app, router, "bindet Router ein")
++Rel(app, stores, "bindet State-Management ein")
++Rel(app, layouts, "nutzt Layout-Komponenten")
++Rel(pages, components, "nutzt UI-Komponenten")
++Rel(pages, layouts, "wird in Layouts eingebettet")
++Rel(pages, stores, "greift auf globalen Zustand zu")
++Rel(pages, api, "sendet API-Requests")
++Rel(api, types, "nutzt Typen")
++Rel(stores, types, "nutzt Typen")
++Rel(pages, utils, "nutzt Hilfsfunktionen")
++@enduml
++
++
++
++/' 
++
++Das Diagramm zeigt, wie Vue-3 in verschiedene Komponenten aufgeteilt ist. Die Datei main.ts ist der Startpunkt der App, sie lädt App.vue, das die Grundstruktur der Seite 
++enthält (z. B. Navigationsbereich mit RouterView). Die App verwendet auch Router, um zu steuern, welche Seite angezeigt wird. Seiten wie Login oder Artikelansicht liegen im Ordner Pages 
++und bestehen aus kleineren Bausteinen aus dem Ordner Components. Das Layout bestimmt das allgemeine Aussehen (z. B. Header, Footer), während Stores den Zustand der App 
++verwalten (z. B. ob ein Nutzer eingeloggt ist). Mit API werden Daten vom Backend abgefragt oder gesendet (z. B. Artikel laden oder Login). Types helfen dem Entwickler, Strukturen wie 
++„Was ist ein Artikel?“ genau zu beschreiben. Und Utils sind kleine Hilfsfunktionen, z. B. für Datum-Formatierung.
++
++'/
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github "a/docs/diagramme/Level 4 Code-Diagramm_Articles.wsd" "M1_abgabe/repo/docs/diagramme/Level 4 Code-Diagramm_Articles.wsd"
+--- "a/docs/diagramme/Level 4 Code-Diagramm_Articles.wsd"	1970-01-01 01:00:00.000000000 +0100
++++ "a/docs/diagramme/Level 4 Code-Diagramm_Articles.wsd"	2025-04-25 21:50:46.000000000 +0200
+@@ -0,0 +1,101 @@
++@startuml
++package "Articles" {
++
++  interface IArticlesHandler {
++    +CreateArticleAsync(newArticle: NewArticleDto, username: string, cancellationToken): Task<Article>
++    +UpdateArticleAsync(update: ArticleUpdateDto, slug: string, username: string, cancellationToken): Task<Article>
++    +DeleteArticleAsync(slug: string, username: string, cancellationToken): Task
++    +GetArticlesAsync(query: ArticlesQuery, username: string, isFeed: bool, cancellationToken): Task<ArticlesResponseDto>
++    +GetArticleBySlugAsync(slug: string, username: string, cancellationToken): Task<Article>
++    +AddCommentAsync(slug: string, username: string, commentDto: CommentDto, cancellationToken): Task<Comment>
++    +RemoveCommentAsync(slug: string, commentId: int, username: string, cancellationToken): Task
++    +GetCommentsAsync(slug: string, username: string, cancellationToken): Task<List<Comment>>
++    +AddFavoriteAsync(slug: string, username: string, cancellationToken): Task<Article>
++    +DeleteFavorite(slug: string, username: string, cancellationToken): Task<Article>
++  }
++
++  class ArticlesHandler {
++    -_repository: IConduitRepository
++    +CreateArticleAsync(...)
++    +UpdateArticleAsync(...)
++    +DeleteArticleAsync(...)
++    +GetArticlesAsync(...)
++    +GetArticleBySlugAsync(...)
++    +AddCommentAsync(...)
++    +RemoveCommentAsync(...)
++    +GetCommentsAsync(...)
++    +AddFavoriteAsync(...)
++    +DeleteFavorite(...)
++  }
++
++  class ArticlesModule {
++    +AddRoutes(app: IEndpointRouteBuilder): void
++  }
++
++  class ArticleResponse {
++    +Slug: string
++    +Title: string
++    +Description: string
++    +Body: string
++    +CreatedAt: DateTimeOffset
++    +UpdatedAt: DateTimeOffset
++    +TagList: IEnumerable<string>
++    +Author: Author
++    +Favorited: bool
++    +FavoritesCount: int
++  }
++
++  class Author {
++    +Username: string
++    +Image: string
++    +Bio: string
++    +Following: bool
++  }
++
++  class ArticlesResponse {
++    +Articles: IEnumerable<ArticleResponse>
++    +ArticlesCount: int
++  }
++
++  class ArticleEnvelope<T> {
++    +Article: T
++  }
++
++  class Comment {
++    +Id: int
++    +CreatedAt: DateTimeOffset
++    +UpdatedAt: DateTimeOffset
++    +Body: string
++    +Author: Author
++  }
++
++
++
++
++
++  class ArticleEnvelope<T>
++  class ArticlesResponse
++
++  IArticlesHandler <|.. ArticlesHandler
++  ArticlesModule --> IArticlesHandler
++  ArticlesHandler --> ArticleResponse
++  ArticlesHandler --> Author
++  ArticlesHandler --> Comment
++  ArticlesModule --> ArticleEnvelope
++  ArticlesModule --> ArticlesResponse
++
++}
++@enduml
++
++
++
++/' 
++
++Dieses Diagramm zeigt die Struktur der Artikel-Komponente im Backend. Im Zentrum steht die Klasse ArticlesHandler 
++Sie enthält die gesamte Logik rund um Artikel und Kommentare ... . Sie bietet Methoden zum Erstellen, Aktualisieren, Löschen und Abrufen von Artikeln sowie zum Hinzufügen und Entfernen von Kommentaren
++Die Klasse implementiert das Interface IArticlesHandler , welches die Methoden vorgibt, die öffentlich nutzbar sind
++Die Klasse ArticlesModule verwendet dieses Interface, um die HTTP-Routen des Backends mit der Logik zu verbinden, auch verwendet ArticlesHandler mehrere Datenklassen wie:
++ArticleResponse – enthält die Daten eines Artikels, Author – beschreibt den Autor, Comment – enthält Kommentardaten.
++Zusätzlich gibt es auch Rückgabetypen wie ArticleEnvelope<T> und ArticlesResponse, sie werden verwendet, um mehrere Artikel (mit Zähler) oder einen einzelnen Artikel als Antwort der API zurückzugeben
++
++'/
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github "a/docs/diagramme/Level 4 Code-Diagramm_Artikel-anlegen_flutter.wsd" "M1_abgabe/repo/docs/diagramme/Level 4 Code-Diagramm_Artikel-anlegen_flutter.wsd"
+--- "a/docs/diagramme/Level 4 Code-Diagramm_Artikel-anlegen_flutter.wsd"	1970-01-01 01:00:00.000000000 +0100
++++ "a/docs/diagramme/Level 4 Code-Diagramm_Artikel-anlegen_flutter.wsd"	2025-04-25 21:50:46.000000000 +0200
+@@ -0,0 +1,59 @@
++@startuml
++title Sequenzdiagramm: Artikel anlegen (Flutter → Backend) – Level 4
++
++actor User
++
++participant "Flutter: AddArticleScreen" as UI
++participant "Flutter: ArticleBloc" as Bloc
++participant "API Endpoint: POST /api/articles" as HttpEndpoint
++participant "ArticlesHandler.CreateArticleAsync()" as Handler
++participant "IConduitRepository" as Repository
++participant "SQLite DB" as DB
++
++User -> UI : Füllt Formular + klickt "Publish Article"
++UI -> Bloc : SubmitArticleEvent(ArticleModel)
++Bloc -> HttpEndpoint : POST /api/articles
++
++HttpEndpoint -> Handler : CreateArticleAsync(NewArticleDto, username)
++Handler -> Repository : GetUserByUsernameAsync(username)
++Repository -> DB : SELECT * FROM users WHERE username = ?
++DB --> Repository : User
++Repository --> Handler : User
++
++Handler -> Repository : UpsertTagsAsync(tagList)
++Repository -> DB : INSERT INTO tags ...
++DB --> Repository : Tag-Objekte
++Repository --> Handler : Tags
++
++Handler -> Handler : Erstelle neuen Article + verknüpfe Author + Tags
++Handler -> Repository : AddArticle(article)
++Handler -> Repository : SaveChangesAsync()
++
++Repository -> DB : INSERT INTO articles ...
++DB --> Repository : OK
++Repository --> Handler : Artikel gespeichert
++
++Handler --> HttpEndpoint : Rückgabe: Article
++HttpEndpoint --> Bloc : 200 OK + Article
++Bloc --> UI : Zustand → ArticleAddSuccess
++UI -> User : Zeigt Artikelübersicht oder Weiterleitung
++
++@enduml
++
++/'
++
++Dieses Sequenzdiagramm zeigt den Ablauf beim Erstellen eines neuen Artikels in der Flutter-App – vom Nutzer bis zur Datenbank
++
++Ein Benutzer füllt in der Flutter-Oberfläche (AddArticleScreen) das Artikel-Formular aus (Titel, Beschreibung, Inhalt, Tags) und klickt auf „Publish Article“ 
++Daraufhin löst die UI ein SubmitArticleEvent im ArticleBloc aus
++Der Bloc sendet einen HTTP-POST-Request an /api/articles, mit dem vollständigen Artikelinhalt
++Der Request wird im Backend vom ArticlesHandler.CreateArticleAsync() verarbeitet
++Diese Methode ruft zunächst den aktuellen Benutzer aus der Datenbank ab (via GetUserByUsernameAsync()), da jeder Artikel einen Autor haben muss
++Dann werden die Tags des Artikels gespeichert (UpsertTagsAsync()), was zu einem Insert in die Tabelle tags führt
++Anschließend wird ein neues Article-Objekt erstellt, das mit dem Benutzer und den Tags verknüpft ist
++Der Artikel wird über AddArticle() im Repository gespeichert und mit SaveChangesAsync() in der Datenbank angelegt (INSERT INTO articles).
++Zum Schluss sendet das Backend den gespeicherten Artikel zurück an den Nutzer
++Der Bloc erkennt den Erfolg und wechselt in den Zustand ArticleAddSuccess
++Die UI leitet den Benutzer dann entweder zurück zur Artikelübersicht oder zeigt den neuen Artikel an
++
++'/
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github "a/docs/diagramme/Level 4 Code-Diagramm_Artikel-anlegen_vue3.wsd" "M1_abgabe/repo/docs/diagramme/Level 4 Code-Diagramm_Artikel-anlegen_vue3.wsd"
+--- "a/docs/diagramme/Level 4 Code-Diagramm_Artikel-anlegen_vue3.wsd"	1970-01-01 01:00:00.000000000 +0100
++++ "a/docs/diagramme/Level 4 Code-Diagramm_Artikel-anlegen_vue3.wsd"	2025-04-25 21:50:46.000000000 +0200
+@@ -0,0 +1,53 @@
++@startuml
++title Sequenzdiagramm: Artikel anlegen (Vue 3 → Backend) – Level 4
++
++actor User
++
++participant "Vue: ArticleForm.vue" as Vue
++participant "API: article.ts" as API
++participant "API Endpoint: POST /api/articles" as HttpEndpoint
++participant "ArticlesHandler.CreateArticleAsync()" as Handler
++participant "IConduitRepository" as Repository
++participant "SQLite DB" as DB
++
++User -> Vue : Füllt Formular + klickt "Publish Article"
++Vue -> API : createArticle(articleData)
++API -> HttpEndpoint : POST /api/articles
++
++HttpEndpoint -> Handler : CreateArticleAsync(NewArticleDto, username)
++
++Handler -> Repository : GetUserByUsernameAsync(username)
++Repository -> DB : SELECT * FROM users WHERE username = ?
++DB --> Repository : User
++Repository --> Handler : User
++
++Handler -> Repository : UpsertTagsAsync(tagList)
++Repository -> DB : INSERT INTO tags ...
++DB --> Repository : Tag-Objekte
++Repository --> Handler : Tags
++
++Handler -> Handler : Article = new Article(...) + Author + Tags
++Handler -> Repository : AddArticle(article)
++Handler -> Repository : SaveChangesAsync()
++
++Repository -> DB : INSERT INTO articles ...
++DB --> Repository : OK
++Repository --> Handler : Success
++
++Handler --> HttpEndpoint : Rückgabe: Article
++HttpEndpoint --> API : 200 OK + Article
++API --> Vue : router.push("/article/slug")
++Vue -> User : Weiterleitung zum Artikel
++@enduml
++
++
++/' 
++
++Dieses Diagramm zeigt, wie ein neuer Artikel vom Frontend bis zur Datenbank erstellt wird.
++Ein Benutzer füllt in der Vue-Komponente ArticleForm.vue das Formular aus und klickt auf „Publish Article“, Dadurch wird 
++die Methode createArticle() im API-Modul aufgerufen, die einen POST-Request an /api/articles sendet
++Im Backend wird die Methode CreateArticleAsync() im ArticlesHandler aufgerufen, sie fragt zuerst den Benutzer anhand des Benutzernamens
++aus der Datenbank ab, danach werden die Tags gespeichert. Anschließend wird ein neuer Article erstellt, mit dem Benutzer und den Tags verknüpft und dann in der Datenbank gespeichert
++Am Ende sendet das Backend den neuen Artikel zurück an das Frontend, das den Benutzer automatisch zur Artikelseite weiterleitet
++
++'/
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github "a/docs/diagramme/Level 4 Code-Diagramm_Nutzer-Login_flutter.wsd" "M1_abgabe/repo/docs/diagramme/Level 4 Code-Diagramm_Nutzer-Login_flutter.wsd"
+--- "a/docs/diagramme/Level 4 Code-Diagramm_Nutzer-Login_flutter.wsd"	1970-01-01 01:00:00.000000000 +0100
++++ "a/docs/diagramme/Level 4 Code-Diagramm_Nutzer-Login_flutter.wsd"	2025-04-25 21:50:46.000000000 +0200
+@@ -0,0 +1,57 @@
++@startuml
++title Sequenzdiagramm: Nutzer-Login (Flutter → Backend) – Level 4
++
++actor User
++
++participant "Flutter: LoginScreen" as UI
++participant "Flutter: LoginBloc" as Bloc
++participant "Flutter: AuthRepository" as Repository
++participant "Flutter: AuthService" as Service
++participant "API Endpoint: POST /api/users/login" as HttpEndpoint
++participant "UserHandler.LoginAsync()" as Handler
++participant "IConduitRepository" as DBRepo
++participant "SQLite DB" as DB
++
++User -> UI : Gibt E-Mail & Passwort ein + klickt „Sign in“
++UI -> Bloc : add(LoginSubmitEvent(AuthModel))
++Bloc -> Repository : login(email, password)
++Repository -> Service : AuthService.login(email, password)
++Service -> HttpEndpoint : POST /api/users/login
++
++HttpEndpoint -> Handler : LoginAsync(LoginUserDto login)
++Handler -> DBRepo : GetUserByEmailAsync(login.Email)
++DBRepo -> DB : SELECT * FROM Users WHERE Email = ?
++DB --> DBRepo : User oder null
++DBRepo --> Handler : User
++
++alt Gültige Anmeldedaten
++    Handler -> Handler : Prüfe Passwort (user.Password == login.Password)
++    Handler -> Handler : Erzeuge Token
++    Handler --> HttpEndpoint : Rückgabe UserDto mit JWT
++    HttpEndpoint --> Service : 200 OK mit User + Token
++    Service --> Repository : Rückgabe UserDto
++    Repository --> Bloc : Rückgabe UserDto
++    Bloc --> UI : Zustand → LoginSuccess
++    UI -> User : Weiterleitung zur Startseite
++else Ungültige Daten
++    Handler --> HttpEndpoint : Fehler (ProblemDetailsException)
++    HttpEndpoint --> Service : 422 Unprocessable Entity
++    Service --> Repository : Fehlerobjekt
++    Repository --> Bloc : LoginErrorState
++    Bloc --> UI : Zeige Fehlermeldung
++end
++@enduml
++
++
++
++/'
++Dieses Sequenzdiagramm zeigt den Ablauf des Login-Prozesses in der Flutter-App vom Frontend bis zur Datenbank
++Ein Benutzer gibt seine E-Mail und sein Passwort in der LoginScreen ein und klickt auf "Sign in", daraufhin wird im LoginBloc das LoginSubmitEvent ausgelöst
++Der Bloc ruft über das AuthRepository die Methode login() auf
++Das Repository leitet die Daten weiter an den AuthService, welcher einen HTTP-POST-Request an /api/users/login sendet. Dieser Request enthält die Login-Daten
++Im Backend verarbeitet die Methode LoginAsync() im UserHandler diesen Request, sie ruft GetUserByEmailAsync() aus dem IConduitRepository auf, um den Benutzer aus der Datenbank abzurufen
++Wenn ein Benutzer gefunden wurde und das Passwort korrekt ist, wird ein JWT-Token erzeugt und mit dem UserDto zurückgegeben.
++Diese Daten fließen in umgekehrter Reihenfolge zurück bis zur Flutter-UI und dort erkennt der Bloc den Erfolg, wechselt in den Zustand LoginSuccess und die UI leitet den Benutzer auf die Startseite weiter
++Falls die Anmeldedaten ungültig sind, wird stattdessen eine Fehlermeldung (422) zurückgegeben. Diese durchläuft ebenfalls  Service, Repository und Bloc und wird schließlich als Fehlerstatus in der UI angezeigt
++
++'/
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github "a/docs/diagramme/Level 4 Code-Diagramm_Nutzer-Login_vue3.wsd" "M1_abgabe/repo/docs/diagramme/Level 4 Code-Diagramm_Nutzer-Login_vue3.wsd"
+--- "a/docs/diagramme/Level 4 Code-Diagramm_Nutzer-Login_vue3.wsd"	1970-01-01 01:00:00.000000000 +0100
++++ "a/docs/diagramme/Level 4 Code-Diagramm_Nutzer-Login_vue3.wsd"	2025-04-25 21:50:46.000000000 +0200
+@@ -0,0 +1,53 @@
++@startuml
++title Sequenzdiagramm: Nutzer-Login (Vue 3 → Backend) – Level 4
++
++actor User
++
++participant "Vue: AuthPage.vue" as Vue
++participant "Pinia: useUserStore" as Store
++participant "API: user.ts" as API
++participant "API Endpoint: POST /api/users/login" as HttpEndpoint
++participant "UserHandler.LoginAsync()" as Handler
++participant "IConduitRepository" as Repository
++participant "SQLite DB" as DB
++
++User -> Vue : Füllt Formular + klickt "Sign in"
++Vue -> Store : handleAuthAction("login", userData)
++Store -> API : loginUser(userData)
++API -> HttpEndpoint : POST /api/users/login
++
++HttpEndpoint -> Handler : LoginAsync(LoginUserDto login)
++Handler -> Repository : GetUserByEmailAsync(login.Email)
++Repository -> DB : SELECT * FROM Users WHERE Email = ?
++DB --> Repository : User oder null
++Repository --> Handler : User
++
++alt Gültige Anmeldedaten
++    Handler -> Handler : Prüfe Passwort (user.Password == login.Password)
++    Handler -> Handler : Erzeuge Token
++    Handler --> HttpEndpoint : Rückgabe UserDto mit JWT
++    HttpEndpoint --> API : 200 OK mit User + Token
++    API --> Store : Speichere Token (LocalStorage)
++    
++    /' bringt den Nutzer zur Startseite'/
++    Store --> Vue : router.push("/")
++    
++    Vue -> User : Zeigt Startseite
++else Ungültige Daten
++    Handler --> HttpEndpoint : Fehler (ProblemDetailsException)
++    HttpEndpoint --> API : 422 Unprocessable Entity
++    API --> Store : Fehlerobjekt
++    Store --> Vue : Zeigt Fehlermeldung
++end
++@enduml
++
++
++
++/' 
++
++Dieses Diagramm zeigt den Ablauf des Login-Vorgangs vom Benutzer bis zur Datenbank. Ein Benutzer füllt im Frontend (Vue.js) das Login-Formular aus und klickt auf "Sign in"
++Die AuthPage.vue ruft dann handleAuthAction() im Store auf, der wiederum loginUser() im API-Modul ausführt. Dieser sendet einen POST-Request an /api/users/login
++Im Backend verarbeitet die Methode LoginAsync() im UserHandler den Request. Sie ruft GetUserByEmailAsync() im Repository auf, das prüft, ob der Benutzer in der Datenbank existiert
++Wenn ja, wird ein JWT-Token erzeugt und an das Frontend zurückgesendet. Bei Fehlern wird eine passende Fehlermeldung (z. B. 422) zurückgegeben
++
++'/
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github "a/docs/diagramme/Level 4 Code-Diagramm_Profiles.wsd" "M1_abgabe/repo/docs/diagramme/Level 4 Code-Diagramm_Profiles.wsd"
+--- "a/docs/diagramme/Level 4 Code-Diagramm_Profiles.wsd"	1970-01-01 01:00:00.000000000 +0100
++++ "a/docs/diagramme/Level 4 Code-Diagramm_Profiles.wsd"	2025-04-25 21:50:46.000000000 +0200
+@@ -0,0 +1,62 @@
++@startuml
++package "Profiles" {
++
++  interface IProfilesHandler {
++    +GetAsync(profileUsername: string, username: string, cancellationToken): Task<ProfileDto>
++    +FollowProfileAsync(profileUsername: string, username: string, cancellationToken): Task<ProfileDto>
++    +UnFollowProfileAsync(profileUsername: string, username: string, cancellationToken): Task<ProfileDto>
++  }
++
++  class ProfilesHandler {
++    -_repository: IConduitRepository
++    +GetAsync(...)
++    +FollowProfileAsync(...)
++    +UnFollowProfileAsync(...)
++  }
++
++  class ProfilesModule {
++    +AddRoutes(app: IEndpointRouteBuilder): void
++  }
++
++  class ProfilesEnvelope<T> {
++    +Profile: T
++  }
++
++  class Profile {
++    +Username: string
++    +Bio: string
++    +Image: string
++    +Following: bool
++  }
++
++
++class ProfileDto {
++  +Username: string
++  +Bio: string
++  +Image: string
++  +Following: bool
++}
++
++
++  IProfilesHandler <|.. ProfilesHandler
++  ProfilesModule --> IProfilesHandler : uses
++  ProfilesModule --> ProfilesEnvelope
++  ProfilesHandler --> ProfileDto
++}
++
++@enduml
++
++
++
++/' 
++
++Das Diagramm zeigt die Profiles-Komponente des Backends, die für das Anzeigen und Verwalten von Benutzerprofilen zuständig ist
++Im Zentrum steht die Klasse ProfilesHandler, die Methoden wie GetAsync, FollowProfileAsync und UnFollowProfileAsync bereitstellt
++Diese Methoden werden im Interface IProfilesHandler definiert, das von ProfilesHandler implementiert wird
++Die Klasse ProfilesModule verbindet die API-Endpunkte wie /api/profiles/{username} mit dem System
++Sie benutzt das Interface IProfilesHandler, um die Logik auszuführen, und das ProfilesEnvelope, um die Profil-Daten als Antwort zurückzugeben
++Das Rückgabeformat basiert auf dem ProfileDto, der vom ProfilesHandler verwendet wird
++er enthält grundlegende Profildaten wie Benutzername, Bild und ob der aktuelle Nutzer diesem Profil folgt
++
++
++'/
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github "a/docs/diagramme/Level 4 Code-Diagramm_Tags.wsd" "M1_abgabe/repo/docs/diagramme/Level 4 Code-Diagramm_Tags.wsd"
+--- "a/docs/diagramme/Level 4 Code-Diagramm_Tags.wsd"	1970-01-01 01:00:00.000000000 +0100
++++ "a/docs/diagramme/Level 4 Code-Diagramm_Tags.wsd"	2025-04-25 21:50:46.000000000 +0200
+@@ -0,0 +1,37 @@
++@startuml
++package "Tags" {
++
++  interface ITagsHandler {
++    +GetTagsAsync(cancellationToken: CancellationToken): Task<string[]>
++  }
++
++  class TagsHandler {
++    -_repository: IConduitRepository
++    +GetTagsAsync(cancellationToken: CancellationToken): Task<string[]>
++  }
++
++  class TagsModule {
++    +AddRoutes(app: IEndpointRouteBuilder): void
++  }
++
++  class TagsEnvelope<T> {
++    +tags: T
++  }
++
++  ITagsHandler <|.. TagsHandler
++  TagsModule --> ITagsHandler : uses
++  TagsModule --> TagsEnvelope
++}
++@enduml
++
++
++
++/' 
++
++Das Diagramm zeigt die Struktur der Tags-Komponente im Backend, sie ist für das Abrufen der verfügbaren Tags im System zuständig
++Im Zentrum steht die Klasse TagsHandler, die die Methode GetTagsAsync() enthält, die alle Tags aus der Datenbank abfragt
++Die Klasse implementiert das Interface ITagsHandler, das die Methode festlegt, die von außen verwendet werden kann
++Die Klasse TagsModule verbindet die API-Endpunkte wie  "/api/tags" mit dem System
++und nutzt das Interface ITagsHandler, um die Daten zu holen, und das TagsEnvelope, um die Liste der Tags in der Antwort zu verpacken
++
++'/
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github "a/docs/diagramme/Level 4 Code-Diagramm_users.wsd" "M1_abgabe/repo/docs/diagramme/Level 4 Code-Diagramm_users.wsd"
+--- "a/docs/diagramme/Level 4 Code-Diagramm_users.wsd"	1970-01-01 01:00:00.000000000 +0100
++++ "a/docs/diagramme/Level 4 Code-Diagramm_users.wsd"	2025-04-25 21:50:46.000000000 +0200
+@@ -0,0 +1,75 @@
++@startuml
++package "Users" {
++
++  interface IUserHandler {
++    +CreateAsync(newUser: NewUserDto, cancellationToken: CancellationToken): Task<UserDto>
++    +UpdateAsync(username: string, updatedUser: UpdatedUserDto, cancellationToken: CancellationToken): Task<UserDto>
++    +LoginAsync(login: LoginUserDto, cancellationToken: CancellationToken): Task<UserDto>
++    +GetAsync(username: string, cancellationToken: CancellationToken): Task<UserDto>
++  }
++
++  class UserHandler {
++    -_repository: IConduitRepository
++    -_tokenGenerator: ITokenGenerator
++    +CreateAsync(...)
++    +UpdateAsync(...)
++    +LoginAsync(...)
++    +GetAsync(...)
++  }
++
++  class UserEnvelope<T> {
++    +User: T
++  }
++
++  class UserModule {
++    +AddRoutes(app: IEndpointRouteBuilder): void
++  }
++
++  class NewUserDto {
++    +Username: string
++    +Email: string
++    +Password: string
++  }
++
++  class UpdatedUserDto {
++    +Username: string
++    +Email: string
++    +Password: string
++    +Bio: string
++    +Image: string
++  }
++
++  class LoginUserDto {
++    +Email: string
++    +Password: string
++  }
++
++  class UserDto {
++    +Username: string
++    +Email: string
++    +Token: string
++    +Bio: string
++    +Image: string
++  }
++
++  IUserHandler <|.. UserHandler
++  UserModule --> IUserHandler : uses
++  UserModule --> UserEnvelope
++  UserHandler --> UserDto
++  UserHandler --> NewUserDto
++  UserHandler --> UpdatedUserDto
++  UserHandler --> LoginUserDto
++}
++@enduml
++
++
++
++/' 
++
++Das Diagramm zeigt die Benutzer-Komponente im Backend.
++UserHandler ist die Hauptklasse, die alle Benutzerfunktionen wie Login, Registrierung oder Profiländerung enthält
++Sie implementiert das Interface IUserHandler, das die Methode festlegt, die von außen verwendet werden kann
++Der UserHandler nutzt verschiedene DTOs (z. B. NewUserDto, LoginUserDto) für die Eingabe und gibt ein UserDto zurück
++Das UserModule verbindet die Routen mit dem UserHandler und verwendet dafür auch die Struktur UserEnvelope, um das User-Objekt als Antwort zurückzugeben
++
++'/
+\ No newline at end of file

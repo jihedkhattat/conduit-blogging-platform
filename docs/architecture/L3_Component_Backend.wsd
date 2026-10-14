@@ -1,0 +1,27 @@
+@startuml
+!include <C4/C4_Component>
+
+Container_Boundary(backend, "ASP.NET Core Backend") {
+
+  Component(Api, "API Layer", "Controllers + DTOs", "Stellt HTTP-Endpunkte für das Frontend bereit (REST-API)")
+  Component(Core, "Core Layer", "Logik + Interfaces", "Beinhaltet Entitäten, Interfaces, und Anwendungslogik")
+  Component(Data, "Data Layer", "DB-Kontext + Repositories", "Zuständig für Datenzugriff über Entity Framework")
+  Component(Infrastructure, "Infrastructure Layer", "Service-Implementierungen", "Technische Details, z. B. Dateidienste")
+}
+
+Rel(Api, Core, "verwendet Application-Services und Interfaces")
+Rel(Api, Data, "nutzt Repositories über Core-Interfaces")
+Rel(Core, Infrastructure, "wird durch konkrete Services implementiert")
+Rel(Data, Core, "implementiert Repository-Interfaces")
+@enduml
+
+
+/' 
+
+Das Diagramm zeigt, wie das ASP.NET Core Backend in Schichten aufgebaut ist
+Ganz außen liegt die API-Schicht, sie stellt die HTTP-Endpunkte bereit, über die die Frontends mit dem System kommunizieren
+Die API-Schicht nutzt die Core-Schicht, die die Geschäftslogik und wichtige Schnittstellen enthält
+Die Daten werden über die Data-Schicht verwaltet, sie enthält den Datenbankzugriff (z. B. über Entity Framework) und implementiert die Schnittstellen aus der Core-Schicht
+Die Infrastructure-Schicht enthält technische Details wie Dienste zur Datei- oder Tokenverwaltung und wird von der Core-Schicht verwendet
+
+'/

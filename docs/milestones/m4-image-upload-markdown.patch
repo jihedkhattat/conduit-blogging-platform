@@ -1,0 +1,3629 @@
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Api/Features/Articles/ArticlesMapper.cs M4_abgabe/repo/apps/dotnet/src/Api/Features/Articles/ArticlesMapper.cs
+--- a/apps/dotnet/src/Api/Features/Articles/ArticlesMapper.cs	2025-06-16 17:32:09.000000000 +0200
++++ b/apps/dotnet/src/Api/Features/Articles/ArticlesMapper.cs	2025-07-04 17:53:31.000000000 +0200
+@@ -8,6 +8,9 @@
+     {
+         var tags = article.Tags.Select(tag => tag.Id);
+         var author = article.Author;
++        //  Collect image URLs from associated ArticleImage entities
++        var imageUrls = article.ImageUrls.Select(img => img.Url).ToList();
++
+         var result = new ArticleResponse(
+             article.Slug,
+             article.Title,
+@@ -23,7 +26,10 @@
+                 author.Followers.Any()),
+             article.Favorited,
+             article.FavoritesCount,
+-            article.ReadCount);
++            article.ReadCount,
++            
++            imageUrls //  Add image URLs here
++        );
+         return result;
+     }
+ 
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Api/Features/Articles/ArticlesModel.cs M4_abgabe/repo/apps/dotnet/src/Api/Features/Articles/ArticlesModel.cs
+--- a/apps/dotnet/src/Api/Features/Articles/ArticlesModel.cs	2025-06-16 17:32:09.000000000 +0200
++++ b/apps/dotnet/src/Api/Features/Articles/ArticlesModel.cs	2025-07-04 17:53:31.000000000 +0200
+@@ -6,13 +6,18 @@
+ 
+ public record CommentsEnvelope<T>(T comments);
+ 
+-public record Comment(int Id,
++public record Comment(
++    int Id,
+     DateTimeOffset CreatedAt,
+     DateTimeOffset UpdatedAt,
+     string Body,
+     Author Author);
+ 
+-public record Author(string Username, string Image, string Bio, bool Following);
++public record Author(
++    string Username,
++    string Image,
++    string Bio,
++    bool Following);
+ 
+ public record ArticleResponse(
+     string Slug,
+@@ -25,6 +30,8 @@
+     Author Author,
+     bool Favorited,
+     int FavoritesCount,
+-    int ReadCount);
++    int ReadCount,
++    List<string> ImageUrls //  Added image URLs
++);
+ 
+ public record ArticlesResponse(IEnumerable<ArticleResponse> Articles, int ArticlesCount);
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Api/Features/Articles/ArticlesModule.cs M4_abgabe/repo/apps/dotnet/src/Api/Features/Articles/ArticlesModule.cs
+--- a/apps/dotnet/src/Api/Features/Articles/ArticlesModule.cs	2025-06-16 17:32:09.000000000 +0200
++++ b/apps/dotnet/src/Api/Features/Articles/ArticlesModule.cs	2025-07-04 17:53:31.000000000 +0200
+@@ -1,5 +1,9 @@
+ using Microsoft.AspNetCore.Mvc;
+ using Realworlddotnet.Core.Dto;
++using Realworlddotnet.Core.Entities;
++using Realworlddotnet.Data.Contexts;
++using System.Security.Claims;
++using Microsoft.Data.Sqlite;
+ 
+ namespace Realworlddotnet.Api.Features.Articles;
+ 
+@@ -14,172 +18,233 @@
+         var authorizedGroup = app.MapGroup("articles")
+             .RequireAuthorization()
+             .WithTags("Articles")
+-            .IncludeInOpenApi()
+-            ;
++            .IncludeInOpenApi();
++
++        // -----------------------------Bilder zu einem Blogartikel hochladen----------------------------------
++        // Dieser Endpunkt erlaubt es, ein Bild für einen bestimmten Artikel (erkannt über den 'slug') hochzuladen.
++        // Die Bilder werden serverseitig gespeichert und die URL wird in der Datenbank mit dem Artikel verknüpft.
++        authorizedGroup.MapPost("{slug}/images",
++            async Task<IResult> (
++                string slug,
++                [FromForm] IFormFile file,
++                ClaimsPrincipal user,
++                ConduitContext db,
++                HttpContext context) =>
++            {
++                // Prüfen, ob eine Datei übermittelt wurde
++                if (file == null || file.Length == 0)
++                    return Results.BadRequest("No file uploaded");
++
++                // Nur bestimmte Dateiformate sind erlaubt
++                var allowedExtensions = new[] { ".jpg", ".jpeg", ".png" };
++                var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
++                if (!allowedExtensions.Contains(ext))
++                    return Results.BadRequest("Only JPG, JPEG, PNG allowed");
++
++                // Artikel anhand des Slugs aus der Datenbank laden
++                var article = db.Articles.FirstOrDefault(a => a.Slug == slug);
++                if (article == null)
++                    return Results.NotFound("Article not found");
++
++                // Sicherstellen, dass der Upload-Ordner existiert
++                var uploadsPath = Path.Combine("wwwroot", "uploads");
++                if (!Directory.Exists(uploadsPath))
++                    Directory.CreateDirectory(uploadsPath);
++
++                // Eindeutigen Dateinamen für das Bild generieren
++                var fileName = $"{Guid.NewGuid()}{ext}";
++                var filePath = Path.Combine(uploadsPath, fileName);
++
++                // Die hochgeladene Datei speichern
++                using var stream = new FileStream(filePath, FileMode.Create);
++                await file.CopyToAsync(stream);
++
++                // Öffentliche URL des Bildes generieren
++                var imageUrl = $"{context.Request.Scheme}://{context.Request.Host}/uploads/{fileName}";
++
++                // Neues Bildobjekt erzeugen und mit dem Artikel verknüpfen
++                var articleImage = new ArticleImage
++                {
++                    Url = imageUrl,
++                    ArticleId = article.Id
++                };
++
++                // Bild-Objekt zur Datenbank hinzufügen
++                db.ArticleImages.Add(articleImage);
++                article.ImageUrls.Add(articleImage); // Auch die Navigationseigenschaft des Artikels aktualisieren
++
++                await db.SaveChangesAsync();
++
++                // URL des hochgeladenen Bildes zurückgeben
++                return Results.Ok(new { uploaded = imageUrl });
++            })
++        .Accepts<IFormFile>("multipart/form-data")
++        .WithName("UploadArticleImages");
++        //-----------------------------------------------------------------------------------------------------------------------
+ 
+         unAuthorizedGroup.MapGet("/",
+-                async Task<Ok<ArticlesResponse>>
+-                ([AsParameters] ArticlesQuery query, IArticlesHandler articlesHandler,
+-                    ClaimsPrincipal claimsPrincipal) =>
++            async Task<Ok<ArticlesResponse>> ([AsParameters] ArticlesQuery query, IArticlesHandler articlesHandler,
++                ClaimsPrincipal claimsPrincipal) =>
++            {
++                var user = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
++                ArticlesResponseDto response = null;
++                while (true)
+                 {
+-                    var user = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
+-                    ArticlesResponseDto response = null;
+-                    while (true)
++                    try
++                    {
++                        response = await articlesHandler.GetArticlesAsync(query, user, false,
++                            new CancellationToken());
++                        break;
++                    }
++                    catch (SqliteException)
+                     {
+-                        try
+-                        {
+-                            response = await articlesHandler.GetArticlesAsync(query, user, false,
+-                                new CancellationToken());
+-                            break;
+-                        }
+-                        catch (SqliteException e)
+-                        {
+-                            Thread.Sleep(100);
+-                        }
++                        Thread.Sleep(100);
+                     }
++                }
+ 
+-                    var result = ArticlesMapper.MapFromArticles(response);
+-                    return TypedResults.Ok(result);
+-                })
+-            .WithName("GetArticles");
++                var result = ArticlesMapper.MapFromArticles(response);
++                return TypedResults.Ok(result);
++            })
++        .WithName("GetArticles");
+ 
+         unAuthorizedGroup.MapGet("/{slug}",
+-                async Task<Ok<ArticleEnvelope<ArticleResponse>>>
+-                (string slug, IArticlesHandler articlesHandler,
+-                    ClaimsPrincipal claimsPrincipal) =>
+-                {
+-                    var user = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
+-                    var article = await articlesHandler.GetArticleBySlugAsync(slug, user, new CancellationToken());
+-                    var result = ArticlesMapper.MapFromArticleEntity(article);
+-                    return TypedResults.Ok(new ArticleEnvelope<ArticleResponse>(result));
+-                })
+-            .WithName("GetArticle");
++            async Task<Ok<ArticleEnvelope<ArticleResponse>>> (string slug, IArticlesHandler articlesHandler,
++                ClaimsPrincipal claimsPrincipal) =>
++            {
++                var user = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
++                var article = await articlesHandler.GetArticleBySlugAsync(slug, user, new CancellationToken());
++                var result = ArticlesMapper.MapFromArticleEntity(article);
++                return TypedResults.Ok(new ArticleEnvelope<ArticleResponse>(result));
++            })
++        .WithName("GetArticle");
+ 
+         unAuthorizedGroup.MapGet("/{slug}/comments",
+-                async Task<Ok<CommentsEnvelope<List<Comment>>>>
+-                (string slug, IArticlesHandler articlesHandler,
+-                    ClaimsPrincipal claimsPrincipal) =>
+-                {
+-                    var user = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
+-                    var result = await articlesHandler.GetCommentsAsync(slug, user, new CancellationToken());
+-                    var comments = result.Select(CommentMapper.MapFromCommentEntity);
+-                    return TypedResults.Ok(new CommentsEnvelope<List<Comment>>(comments.ToList()));
+-                })
+-            .WithName("GetArticleComments");
+-
++            async Task<Ok<CommentsEnvelope<List<Comment>>>> (string slug, IArticlesHandler articlesHandler,
++                ClaimsPrincipal claimsPrincipal) =>
++            {
++                var user = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
++                var result = await articlesHandler.GetCommentsAsync(slug, user, new CancellationToken());
++                var comments = result.Select(CommentMapper.MapFromCommentEntity);
++                return TypedResults.Ok(new CommentsEnvelope<List<Comment>>(comments.ToList()));
++            })
++        .WithName("GetArticleComments");
+ 
+         authorizedGroup.MapPost("/",
+-                async Task<Results<Ok<ArticleEnvelope<ArticleResponse>>, ValidationProblem>>
+-                (ArticleEnvelope<NewArticleDto> request, IArticlesHandler articlesHandler,
+-                    ClaimsPrincipal claimsPrincipal) =>
+-                {
+-                    if (!MiniValidator.TryValidate(request, out var errors))
+-                        return TypedResults.ValidationProblem(errors);
+-                    
+-                    var user = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
+-                    var article =
+-                        await articlesHandler.CreateArticleAsync(request.Article, user!, new CancellationToken());
+-                    var result = ArticlesMapper.MapFromArticleEntity(article);
+-                    return TypedResults.Ok(new ArticleEnvelope<ArticleResponse>(result));
+-                })
+-            .Produces(StatusCodes.Status401Unauthorized)
+-            .WithName("CreateArticle");
++            async Task<Results<Ok<ArticleEnvelope<ArticleResponse>>, ValidationProblem>> (
++                ArticleEnvelope<NewArticleDto> request,
++                IArticlesHandler articlesHandler,
++                ClaimsPrincipal claimsPrincipal) =>
++            {
++                if (!MiniValidator.TryValidate(request, out var errors))
++                    return TypedResults.ValidationProblem(errors);
++
++                var user = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
++                var article = await articlesHandler.CreateArticleAsync(request.Article, user!, new CancellationToken());
++                var result = ArticlesMapper.MapFromArticleEntity(article);
++                return TypedResults.Ok(new ArticleEnvelope<ArticleResponse>(result));
++            })
++        .Produces(StatusCodes.Status401Unauthorized)
++        .WithName("CreateArticle");
+ 
+         authorizedGroup.MapPut("/{slug}",
+-                async Task<Results<Ok<ArticleEnvelope<ArticleResponse>>,ValidationProblem>>
+-                (string slug, ArticleEnvelope<ArticleUpdateDto> request, IArticlesHandler articlesHandler,
+-                    ClaimsPrincipal claimsPrincipal) =>
+-                {
+-                    if (!MiniValidator.TryValidate(request, out var errors))
+-                        return TypedResults.ValidationProblem(errors);
+-                    
+-                    var user = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
+-                    var article =
+-                        await articlesHandler.UpdateArticleAsync(request.Article, slug, user!, new CancellationToken());
+-                    var result = ArticlesMapper.MapFromArticleEntity(article);
+-                    return TypedResults.Ok(new ArticleEnvelope<ArticleResponse>(result));
+-                })
+-            .Produces(StatusCodes.Status401Unauthorized)
+-            .WithName("UpdateArticle");
++            async Task<Results<Ok<ArticleEnvelope<ArticleResponse>>, ValidationProblem>> (
++                string slug,
++                ArticleEnvelope<ArticleUpdateDto> request,
++                IArticlesHandler articlesHandler,
++                ClaimsPrincipal claimsPrincipal) =>
++            {
++                if (!MiniValidator.TryValidate(request, out var errors))
++                    return TypedResults.ValidationProblem(errors);
++
++                var user = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
++                var article =
++                    await articlesHandler.UpdateArticleAsync(request.Article, slug, user!, new CancellationToken());
++                var result = ArticlesMapper.MapFromArticleEntity(article);
++                return TypedResults.Ok(new ArticleEnvelope<ArticleResponse>(result));
++            })
++        .Produces(StatusCodes.Status401Unauthorized)
++        .WithName("UpdateArticle");
+ 
+         authorizedGroup.MapDelete("/{slug}",
+-                async Task<Ok>
+-                (string slug, IArticlesHandler articlesHandler, ClaimsPrincipal claimsPrincipal) =>
+-                {
+-                    var user = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
+-                    await articlesHandler.DeleteArticleAsync(slug, user!, new CancellationToken());
+-                    return TypedResults.Ok();
+-                })
+-            .Produces(StatusCodes.Status401Unauthorized)
+-            .WithName("DeleteArticle");
++            async Task<Ok> (string slug, IArticlesHandler articlesHandler,
++                ClaimsPrincipal claimsPrincipal) =>
++            {
++                var user = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
++                await articlesHandler.DeleteArticleAsync(slug, user!, new CancellationToken());
++                return TypedResults.Ok();
++            })
++        .Produces(StatusCodes.Status401Unauthorized)
++        .WithName("DeleteArticle");
+ 
+         authorizedGroup.MapPost("/{slug}/favorite",
+-                async Task<Ok<ArticleEnvelope<ArticleResponse>>>
+-                (string slug, IArticlesHandler articlesHandler,
+-                    ClaimsPrincipal claimsPrincipal) =>
+-                {
+-                    var user = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
+-                    var article = await articlesHandler.AddFavoriteAsync(slug, user!, new CancellationToken());
+-                    var result = ArticlesMapper.MapFromArticleEntity(article);
+-                    return TypedResults.Ok(new ArticleEnvelope<ArticleResponse>(result));
+-                })
+-            .Produces(StatusCodes.Status401Unauthorized)
+-            .WithName("FavoriteBySlug");
++            async Task<Ok<ArticleEnvelope<ArticleResponse>>> (string slug, IArticlesHandler articlesHandler,
++                ClaimsPrincipal claimsPrincipal) =>
++            {
++                var user = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
++                var article = await articlesHandler.AddFavoriteAsync(slug, user!, new CancellationToken());
++                var result = ArticlesMapper.MapFromArticleEntity(article);
++                return TypedResults.Ok(new ArticleEnvelope<ArticleResponse>(result));
++            })
++        .Produces(StatusCodes.Status401Unauthorized)
++        .WithName("FavoriteBySlug");
+ 
+         authorizedGroup.MapDelete("/{slug}/favorite",
+-                async Task<Ok<ArticleEnvelope<ArticleResponse>>>
+-                (string slug, IArticlesHandler articlesHandler,
+-                    ClaimsPrincipal claimsPrincipal) =>
+-                {
+-                    var user = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
+-                    var article = await articlesHandler.DeleteFavorite(slug, user!, new CancellationToken());
+-                    var result = ArticlesMapper.MapFromArticleEntity(article);
+-                    return TypedResults.Ok(new ArticleEnvelope<ArticleResponse>(result));
+-                })
+-            .Produces(StatusCodes.Status401Unauthorized)
+-            .WithName("UnFavoriteBySlug");
++            async Task<Ok<ArticleEnvelope<ArticleResponse>>> (string slug, IArticlesHandler articlesHandler,
++                ClaimsPrincipal claimsPrincipal) =>
++            {
++                var user = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
++                var article = await articlesHandler.DeleteFavorite(slug, user!, new CancellationToken());
++                var result = ArticlesMapper.MapFromArticleEntity(article);
++                return TypedResults.Ok(new ArticleEnvelope<ArticleResponse>(result));
++            })
++        .Produces(StatusCodes.Status401Unauthorized)
++        .WithName("UnFavoriteBySlug");
+ 
+         authorizedGroup.MapGet("/feed",
+-                async Task<Ok<ArticlesResponse>>
+-                ([AsParameters] FeedQuery query, IArticlesHandler articlesHandler,
+-                    ClaimsPrincipal claimsPrincipal) =>
+-                {
+-                    var user = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
+-                    var articlesQuery = new ArticlesQuery(null, null, null, query.Limit, query.Offset);
+-                    var response =
+-                        await articlesHandler.GetArticlesAsync(articlesQuery, user, false, new CancellationToken());
+-                    var result = ArticlesMapper.MapFromArticles(response);
+-                    return TypedResults.Ok(result);
+-                })
+-            .Produces(StatusCodes.Status401Unauthorized)
+-            .WithName("GetFeed");
++            async Task<Ok<ArticlesResponse>> ([AsParameters] FeedQuery query, IArticlesHandler articlesHandler,
++                ClaimsPrincipal claimsPrincipal) =>
++            {
++                var user = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
++                var articlesQuery = new ArticlesQuery(null, null, null, query.Limit, query.Offset);
++                var response =
++                    await articlesHandler.GetArticlesAsync(articlesQuery, user, false, new CancellationToken());
++                var result = ArticlesMapper.MapFromArticles(response);
++                return TypedResults.Ok(result);
++            })
++        .Produces(StatusCodes.Status401Unauthorized)
++        .WithName("GetFeed");
+ 
+         authorizedGroup.MapPost("{slug}/comments",
+-                async Task<Results<Ok<CommentEnvelope<Comment>>, ValidationProblem>>
+-                (string slug, CommentEnvelope<CommentDto> request, IArticlesHandler articlesHandler,
+-                    ClaimsPrincipal claimsPrincipal) =>
+-                {
+-                    if (!MiniValidator.TryValidate(request, out var errors))
+-                        return TypedResults.ValidationProblem(errors);
+-                    
+-                    var user = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
+-                    var result =
+-                        await articlesHandler.AddCommentAsync(slug, user!, request.comment, new CancellationToken());
+-                    var comment = CommentMapper.MapFromCommentEntity(result);
+-                    return TypedResults.Ok(new CommentEnvelope<Comment>(comment));
+-                })
+-            .Produces(StatusCodes.Status401Unauthorized)
+-            .WithName("CreateComment");
++            async Task<Results<Ok<CommentEnvelope<Comment>>, ValidationProblem>> (
++                string slug,
++                CommentEnvelope<CommentDto> request,
++                IArticlesHandler articlesHandler,
++                ClaimsPrincipal claimsPrincipal) =>
++            {
++                if (!MiniValidator.TryValidate(request, out var errors))
++                    return TypedResults.ValidationProblem(errors);
++
++                var user = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
++                var result =
++                    await articlesHandler.AddCommentAsync(slug, user!, request.comment, new CancellationToken());
++                var comment = CommentMapper.MapFromCommentEntity(result);
++                return TypedResults.Ok(new CommentEnvelope<Comment>(comment));
++            })
++        .Produces(StatusCodes.Status401Unauthorized)
++        .WithName("CreateComment");
+ 
+         authorizedGroup.MapDelete("{slug}/comments/{commentId}",
+-                async Task<Ok> (string slug, int commentId, IArticlesHandler articlesHandler,
+-                    ClaimsPrincipal claimsPrincipal) =>
+-                {
+-                    var user = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
+-                    await articlesHandler.RemoveCommentAsync(slug, commentId, user!, new CancellationToken());
+-                    return TypedResults.Ok();
+-                })
+-            .Produces(StatusCodes.Status401Unauthorized)
+-            .WithName("DeleteArticleComment");
++            async Task<Ok> (
++                string slug,
++                int commentId,
++                IArticlesHandler articlesHandler,
++                ClaimsPrincipal claimsPrincipal) =>
++            {
++                var user = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
++                await articlesHandler.RemoveCommentAsync(slug, commentId, user!, new CancellationToken());
++                return TypedResults.Ok();
++            })
++        .Produces(StatusCodes.Status401Unauthorized)
++        .WithName("DeleteArticleComment");
+     }
+ }
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Api/Features/Profiles/IProfilesHandler.cs M4_abgabe/repo/apps/dotnet/src/Api/Features/Profiles/IProfilesHandler.cs
+--- a/apps/dotnet/src/Api/Features/Profiles/IProfilesHandler.cs	2025-06-16 17:32:09.000000000 +0200
++++ b/apps/dotnet/src/Api/Features/Profiles/IProfilesHandler.cs	2025-07-04 17:53:31.000000000 +0200
+@@ -11,4 +11,9 @@
+ 
+     public Task<ProfileDto> UnFollowProfileAsync(string profileUsername, string username,
+         CancellationToken cancellationToken);
++
++
++    // Diese Methode wird verwendet, um das Profilbild eines Benutzers zu aktualisieren, indem die Bild-URL im Profil gespeichert wird
++    public Task UpdateUserImageAsync(string userId, string imageUrl, CancellationToken cancellationToken);
++
+ }
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Api/Features/Profiles/ProfilesHandler.cs M4_abgabe/repo/apps/dotnet/src/Api/Features/Profiles/ProfilesHandler.cs
+--- a/apps/dotnet/src/Api/Features/Profiles/ProfilesHandler.cs	2025-06-16 17:32:09.000000000 +0200
++++ b/apps/dotnet/src/Api/Features/Profiles/ProfilesHandler.cs	2025-07-04 17:53:31.000000000 +0200
+@@ -62,4 +62,22 @@
+ 
+         return new ProfileDto(profileUser.Username, profileUser.Bio, profileUser.Email, false);
+     }
++
++
++    // Die Methode UpdateUserImageAsync wird verwendet, um das Profilbild eines Benutzers zu aktualisieren
++    public async Task UpdateUserImageAsync(string userId, string imageUrl, CancellationToken cancellationToken)
++    {
++        // Zuerst wird der Benutzer anhand der userId aus der Datenbank geladen
++        var user = await _repository.GetUserByUsernameAsync(userId, cancellationToken);
++
++        // dann wird es geprüft, ob der Benutzer existiert, Falls nicht, wird eine Fehlermeldung mit dem Statuscode 404 ausgelöst
++        if (user == null)
++            throw new ProblemDetailsException(404, "User not found");
++
++        // Wenn der Benutzer existiert, wird das neue Profilbild in das Benutzerobjekt geschrieben
++        user.Image = imageUrl;
++
++        // Die Änderungen am Benutzerprofil werden dauerhaft in der Datenbank gespeichert
++        await _repository.SaveChangesAsync(cancellationToken);
++    }
+ }
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Api/Features/Profiles/ProfilesModule.cs M4_abgabe/repo/apps/dotnet/src/Api/Features/Profiles/ProfilesModule.cs
+--- a/apps/dotnet/src/Api/Features/Profiles/ProfilesModule.cs	2025-06-16 17:32:09.000000000 +0200
++++ b/apps/dotnet/src/Api/Features/Profiles/ProfilesModule.cs	2025-07-04 17:53:31.000000000 +0200
+@@ -1,3 +1,4 @@
++using Microsoft.AspNetCore.Mvc;
+ using Realworlddotnet.Core.Dto;
+ 
+ namespace Realworlddotnet.Api.Features.Profiles;
+@@ -42,5 +43,61 @@
+                     return TypedResults.Ok(new ProfilesEnvelope<ProfileDto>(result));
+                 })
+             .WithName("UnfollowProfile");
++
++
++
++        // Diese Route ermöglicht es einem angemeldeten Benutzer, ein Profilbild hochzuladen
++        group.MapPost("image",
++                async Task<IResult>
++                    ([FromForm] IFormFile file, ClaimsPrincipal claimsPrincipal, IProfilesHandler profilesHandler, HttpContext context) =>
++                {
++                    // Zuerst wird geprüft, ob überhaupt eine Datei hochgeladen wurde
++                    if (file == null || file.Length == 0)
++                        throw new ProblemDetailsException(400, "Keine Datei hochgeladen.");
++
++                    // Es werden nur die Dateiformate JPG, JPEG und PNG akzeptiert
++                    var allowedExtensions = new[] { ".jpg", ".jpeg", ".png" };
++                    var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
++
++                    // Wenn das hochgeladene Dateiformat nicht erlaubt ist, wird ein Fehler mit Status 400 zurückgegeben
++                    if (!allowedExtensions.Contains(extension))
++                        throw new ProblemDetailsException(400, "Nur JPG, JPEG und PNG erlaubt.");
++
++                    // Der aktuell angemeldete Benutzer wird aus dem Authentifizierungs-Token ausgelesen
++                    var username = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
++
++                    // Falls der Benutzer nicht authentifiziert ist, wird 401 Unauthorized zurückgegeben
++                    if (string.IsNullOrEmpty(username))
++                        throw new ProblemDetailsException(401, "Nicht autorisiert.");
++
++                    // Der Speicherpfad für die hochgeladenen Dateien wird festgelegt
++                    var uploadsPath = Path.Combine("wwwroot", "uploads");
++
++                    // Falls das Upload-Verzeichnis noch nicht existiert, wird es automatisch erstellt
++                    if (!Directory.Exists(uploadsPath))
++                        Directory.CreateDirectory(uploadsPath);
++
++                    // Der Dateiname wird aus dem Benutzernamen und der Dateiendung zusammengesetzt
++                    var fileName = $"{username}{extension}";
++
++                    // Der vollständige Speicherpfad der Datei wird erstellt
++                    var filePath = Path.Combine(uploadsPath, fileName);
++
++                    // Die hochgeladene Datei wird im Speicherpfad gespeichert
++                    using var stream = new FileStream(filePath, FileMode.Create);
++                    await file.CopyToAsync(stream);
++
++                    // Die URL zur gespeicherten Datei wird generiert, damit das Frontend das Bild später abrufen kann
++                    var imageUrl = $"{context.Request.Scheme}://{context.Request.Host}/uploads/{fileName}";
++
++                    // Die neue Bild-URL wird im Benutzerprofil gespeichert
++                    await profilesHandler.UpdateUserImageAsync(username, imageUrl, CancellationToken.None);
++
++                    // Am Ende wird die Bild-URL als Bestätigung an das Frontend zurückgegeben
++                    return TypedResults.Ok(new { imageUrl });
++                })
++            .WithName("UploadProfileImage");
++
++
+     }
+ }
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Api/Program.cs M4_abgabe/repo/apps/dotnet/src/Api/Program.cs
+--- a/apps/dotnet/src/Api/Program.cs	2025-06-16 17:32:09.000000000 +0200
++++ b/apps/dotnet/src/Api/Program.cs	2025-07-04 17:53:31.000000000 +0200
+@@ -136,6 +136,21 @@
+ 
+ 
+ app.UsePathBase("/api");
++
++// Hier wird konfiguriert, dass statische Dateien (Bilder) vom Server ausgeliefert werden können
++app.UseStaticFiles(new StaticFileOptions
++{
++    // Beim Ausliefern jeder statischen Datei wird die folgende Anweisung ausgeführt
++    OnPrepareResponse = ctx =>
++    {
++        ctx.Context.Response.Headers.Append("Cache-Control", "no-cache, no-store, must-revalidate"); // Cache wird vollständig deaktiviert
++
++        ctx.Context.Response.Headers.Append("Pragma", "no-cache"); // Auch der alte Pragma-Header wird gesetzt, um das Caching zu verhindern
++        
++        ctx.Context.Response.Headers.Append("Expires", "0"); // Die Datei wird als sofort abgelaufen markiert
++    }
++});
++
+ app.UseRouting();
+ app.UseProblemDetails();
+ app.UseCors();
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Core/Entities/Article.cs M4_abgabe/repo/apps/dotnet/src/Core/Entities/Article.cs
+--- a/apps/dotnet/src/Core/Entities/Article.cs	2025-06-16 17:32:09.000000000 +0200
++++ b/apps/dotnet/src/Core/Entities/Article.cs	2025-07-04 17:53:31.000000000 +0200
+@@ -42,8 +42,10 @@
+ 
+     public List<Comment> Comments { get; set; } = new();
+     public ICollection<ArticleFavorite> ArticleFavorites { get; set; } = new List<ArticleFavorite>();
+-    
+-    
++
++    //  List of image URLs associated with the article
++    public ICollection<ArticleImage> ImageUrls { get; set; } = new List<ArticleImage>();
++
+     public void UpdateArticle(ArticleUpdateDto update)
+     {
+         if (!string.IsNullOrWhiteSpace(update.Title))
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Core/Entities/ArticleImage.cs M4_abgabe/repo/apps/dotnet/src/Core/Entities/ArticleImage.cs
+--- a/apps/dotnet/src/Core/Entities/ArticleImage.cs	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/dotnet/src/Core/Entities/ArticleImage.cs	2025-07-04 17:53:31.000000000 +0200
+@@ -0,0 +1,20 @@
++// Diese Klasse bildet die neue Datenbank-Tabelle "ArticleImages" ab.
++// Sie speichert mehrere Bilder, die einem Artikel zugeordnet sind.
++// Jedes Bild enthält einen eindeutigen Primärschlüssel (Id), die Bild-URL, einen Fremdschlüssel zum Artikel und eine Navigationseigenschaft.
++
++namespace Realworlddotnet.Core.Entities;
++
++public class ArticleImage
++{
++    // Eindeutige ID des Bildes (Primärschlüssel in der Datenbank)
++    public int Id { get; set; }
++
++    // Öffentliche URL, unter der das Bild erreichbar ist (z.B. http://localhost/uploads/abc.jpg)
++    public string Url { get; set; } = string.Empty;
++
++    // Fremdschlüssel, der das Bild mit genau einem Artikel verknüpft
++    public Guid ArticleId { get; set; }
++
++    // Navigationseigenschaft zu dem zugehörigen Artikel-Objekt (für Entity Framework)
++    public Article Article { get; set; } = null!;
++}
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Data/Contexts/ConduitContext.cs M4_abgabe/repo/apps/dotnet/src/Data/Contexts/ConduitContext.cs
+--- a/apps/dotnet/src/Data/Contexts/ConduitContext.cs	2025-06-16 17:32:09.000000000 +0200
++++ b/apps/dotnet/src/Data/Contexts/ConduitContext.cs	2025-07-04 17:53:31.000000000 +0200
+@@ -20,7 +20,11 @@
+     public DbSet<ArticleFavorite> ArticleFavorites { get; set; } = null!;
+ 
+     public DbSet<SearchCount> SearchCount { get; set; } = null!;
+-    
++    //--------------------------------------------------------------------------------------------
++    // NEU: Tabelle für die hochgeladenen Bilder pro Artikel
++    public DbSet<ArticleImage> ArticleImages { get; set; } = null!;
++    //--------------------------------------------------------------------------------------------
++
+     protected override void OnModelCreating(ModelBuilder modelBuilder)
+     {
+         base.OnModelCreating(modelBuilder);
+@@ -74,6 +78,16 @@
+         {
+             entity.HasKey(x => x.KeywordId);
+         });
++        //--------------------------------------------------------------------------------------------
++        //  Konfiguration der Tabelle für die Bilder
++        modelBuilder.Entity<ArticleImage>(entity =>
++        {
++            entity.HasKey(x => x.Id); // Primärschlüssel für Bild
++            entity.Property(x => x.Url).IsRequired(); // Die Bild-URL muss vorhanden sein
++            entity.HasOne(x => x.Article)
++                .WithMany(x => x.ImageUrls) // Die Navigationseigenschaft im Artikel heißt "ImageUrls"
++                .HasForeignKey(x => x.ArticleId); // Fremdschlüssel zur Verknüpfung mit Artikel
++        });
+         
+     }
+ }
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Data/Migrations/20250622085717_AddArticleImages.cs M4_abgabe/repo/apps/dotnet/src/Data/Migrations/20250622085717_AddArticleImages.cs
+--- a/apps/dotnet/src/Data/Migrations/20250622085717_AddArticleImages.cs	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/dotnet/src/Data/Migrations/20250622085717_AddArticleImages.cs	2025-07-04 17:53:31.000000000 +0200
+@@ -0,0 +1,64 @@
++﻿// Diese Migration fügt die Tabelle "ArticleImages" in die Datenbankstruktur ein.
++// Sie enthält die Spalten: Id (Primärschlüssel), Url (Pfad zum Bild) und ArticleId (Fremdschlüssel zum Artikel).
++// Außerdem wird ein Fremdschlüssel definiert, der die Bilder mit den jeweiligen Artikeln verknüpft.
++
++using System;
++using Microsoft.EntityFrameworkCore.Migrations;
++
++#nullable disable
++
++namespace Realworlddotnet.Data.Migrations
++{
++    /// <inheritdoc />
++    public partial class AddArticleImages : Migration
++    {
++        /// <inheritdoc />
++        // Methode wird beim Anwenden der Migration ausgeführt
++        protected override void Up(MigrationBuilder migrationBuilder)
++        {
++            // Tabelle "ArticleImages" erzeugen
++            migrationBuilder.CreateTable(
++                name: "ArticleImages",
++                columns: table => new
++                {
++                    // Spalte für die Bild-ID, Autowert
++                    Id = table.Column<int>(type: "INTEGER", nullable: false)
++                        .Annotation("Sqlite:Autoincrement", true),
++
++                    // Spalte für die URL des Bildes, darf nicht null sein
++                    Url = table.Column<string>(type: "TEXT", nullable: false),
++
++                    // Spalte für den Fremdschlüssel zum Artikel
++                    ArticleId = table.Column<Guid>(type: "TEXT", nullable: false)
++                },
++                constraints: table =>
++                {
++                    // Primärschlüssel auf der Spalte "Id"
++                    table.PrimaryKey("PK_ArticleImages", x => x.Id);
++
++                    // Fremdschlüssel-Verknüpfung zur Tabelle "Articles"
++                    table.ForeignKey(
++                        name: "FK_ArticleImages_Articles_ArticleId",
++                        column: x => x.ArticleId,
++                        principalTable: "Articles",
++                        principalColumn: "Id",
++                        onDelete: ReferentialAction.Cascade); // Löscht Bilder automatisch, wenn Artikel gelöscht wird
++                });
++
++            // Index auf die Spalte "ArticleId" setzen, für schnellere Abfragen
++            migrationBuilder.CreateIndex(
++                name: "IX_ArticleImages_ArticleId",
++                table: "ArticleImages",
++                column: "ArticleId");
++        }
++
++        /// <inheritdoc />
++        // Wird aufgerufen, wenn die Migration zurückgerollt wird
++        protected override void Down(MigrationBuilder migrationBuilder)
++        {
++            // Tabelle "ArticleImages" wird gelöscht
++            migrationBuilder.DropTable(
++                name: "ArticleImages");
++        }
++    }
++}
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Data/Services/ConduitRepository.cs M4_abgabe/repo/apps/dotnet/src/Data/Services/ConduitRepository.cs
+--- a/apps/dotnet/src/Data/Services/ConduitRepository.cs	2025-06-16 17:32:09.000000000 +0200
++++ b/apps/dotnet/src/Data/Services/ConduitRepository.cs	2025-07-04 17:53:31.000000000 +0200
+@@ -215,6 +215,7 @@
+             .Skip(articlesQuery.Offset).Take(articlesQuery.Limit)
+             .Include(x => x.Author)
+             .Include(x => x.Tags)
++            .Include(x => x.ImageUrls)
+             .AsNoTracking();
+ 
+         var page = await pageQuery.ToListAsync(cancellationToken);
+@@ -227,8 +228,9 @@
+     {
+         var query = _context.Articles
+             .Include(x => x.Author)
+-            .Include(x => x.Tags);
+-
++            .Include(x => x.Tags)
++            .Include(x => x.ImageUrls);
++            
+         var article = await query
+             .FirstOrDefaultAsync(x => x.Slug == slug, cancellationToken);
+ 
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/tst/Unit.Tests/ArticleMapperImageTest.cs M4_abgabe/repo/apps/dotnet/tst/Unit.Tests/ArticleMapperImageTest.cs
+--- a/apps/dotnet/tst/Unit.Tests/ArticleMapperImageTest.cs	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/dotnet/tst/Unit.Tests/ArticleMapperImageTest.cs	2025-07-04 17:53:31.000000000 +0200
+@@ -0,0 +1,67 @@
++// Dieser Unit-Test überprüft, ob beim Mapping eines Artikels:
++// 1. Die Bild-URL korrekt in das Response-DTO übernommen wird
++// 2. Der Markdown-Text des Artikels korrekt dargestellt wird
++// Der Test simuliert ein hochgeladenes Bild, eine Beispiel-Markdown-Struktur und prüft das Verhalten des Article-Mappers.
++
++using System.Collections.Generic;
++using Xunit;
++using FluentAssertions;
++using Realworlddotnet.Api.Features.Articles;
++using Realworlddotnet.Core.Entities;
++
++namespace Unit.Tests
++{
++    public class ArticleMapperImageTest
++    {
++        [Fact(DisplayName = "Assignment 4.1 - Unit Test Simulated Image Upload and Markdown Body"),
++         Trait("Number", "4.1")]
++        public void MapFromArticleEntity_ShouldReflectSimulatedImageUpload()
++        {
++
++            // Simulierte öffentliche URL eines hochgeladenen Bildes
++            var uploadedImageUrl = "http://localhost:8081/uploads/fakeUploadedImage.jpg";
++
++            // Bild-Objekt erstellen, wie es nach dem Upload in der Datenbank gespeichert wäre
++            var image = new ArticleImage 
++            { 
++                Url = uploadedImageUrl 
++            };
++
++            // Beispiel-Markdown-Text für den Artikel mit Bild-Placeholder
++            // Der Text enthält eine Überschrift und einen Bildlink im Markdown-Format
++            var markdownBody = @"# Article with Image Placeholder  
++Image below:  
++![alt text](" + uploadedImageUrl + @" ""Uploaded Image"")";
++
++            // Artikel-Objekt simulieren:
++            // - Titel und Beschreibung gesetzt
++            // - Markdown-Text enthält das Bild
++            // - Author ist ein User-Objekt mit Username, Profilbild und Bio
++            // - ImageUrls-Liste enthält das hochgeladene Bild
++            var article = new Article("Test Title", "Test Description", markdownBody)
++            {
++                Author = new User 
++                { 
++                    Username = "testuser", 
++                    Image = "profile.jpg", 
++                    Bio = "Test Bio" 
++                },
++                
++                ImageUrls = new List<ArticleImage> { image }
++            };
++
++
++            // Mapper-Funktion aufrufen, die das Article-Entity in ein DTO umwandelt
++            var response = ArticlesMapper.MapFromArticleEntity(article);
++
++
++            // Prüfen, ob die Bild-URLs im DTO vorhanden sind und die simulierte URL enthalten
++            response.ImageUrls.Should().NotBeNull();
++            response.ImageUrls.Should().Contain(uploadedImageUrl);
++
++            // Prüfen, ob der Body-Text im DTO das Bild korrekt im Markdown enthält
++            response.Body.Should().Contain("![alt text](" + uploadedImageUrl);
++            response.Body.Should().Contain("# Article with Image Placeholder");
++        }
++    }
++}
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/tst/Unit.Tests/Test_ProfilBild/ProfilesImageUploadTest.cs M4_abgabe/repo/apps/dotnet/tst/Unit.Tests/Test_ProfilBild/ProfilesImageUploadTest.cs
+--- a/apps/dotnet/tst/Unit.Tests/Test_ProfilBild/ProfilesImageUploadTest.cs	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/dotnet/tst/Unit.Tests/Test_ProfilBild/ProfilesImageUploadTest.cs	2025-07-04 17:53:31.000000000 +0200
+@@ -0,0 +1,66 @@
++﻿using System.Threading;
++using System.Threading.Tasks;
++
++namespace Unit.Tests.Assignment_4_Test_Cases;
++
++using FluentAssertions;
++using Hellang.Middleware.ProblemDetails;
++using Moq;
++using Realworlddotnet.Api.Features.Profiles;
++using Realworlddotnet.Core.Entities;
++using Realworlddotnet.Core.Repositories;
++using Xunit;
++
++public class ProfilesHandlerImageTest
++{
++    [Fact(DisplayName = "Assignment 4 - Unit Test Image URL Update"),
++     Trait("Number", "4.1")]
++
++    // In diesem Test wird geprüft, ob das Profilbild eines existierenden Benutzers korrekt aktualisiert wird
++    public async Task CheckProfileImageUrlUpdate()
++    {
++        string username = "testuser"; // Es wird ein Beispielbenutzername festgelegt
++        string newImageUrl = "http://localhost:8081/uploads/testuser.jpg"; // Die neue Bild-URL wird definiert
++        var cancellationToken = CancellationToken.None; // Ein Abbruch-Token wird vorbereitet
++
++        var mockRepository = new Mock<IConduitRepository>(); // Das Repository wird gemockt
++        var user = new User { Username = username, Image = "oldImage.jpg" }; // Ein Benutzer mit altem Profilbild wird erstellt
++
++        // Das Repository wird so vorbereitet, dass es den Benutzer korrekt zurückgibt
++        mockRepository.Setup(r => r.GetUserByUsernameAsync(username, cancellationToken))
++                      .ReturnsAsync(user);
++
++        var handler = new ProfilesHandler(mockRepository.Object); // Der Profile-Handler wird mit dem Mock-Repository erstellt
++
++        await handler.UpdateUserImageAsync(username, newImageUrl, cancellationToken); // Die Bild-URL wird aktualisiert
++
++        user.Image.Should().Be(newImageUrl); // Es wird geprüft, ob das neue Bild korrekt im Benutzerobjekt gespeichert wurde
++
++        mockRepository.Verify(r => r.SaveChangesAsync(cancellationToken), Times.Once); // und, ob SaveChangesAsync genau einmal aufgerufen wurde
++    }
++
++    [Fact(DisplayName = "Assignment 4 - Unit Test User Not Found Exception"),
++     Trait("Number", "4.2")]
++
++    // In diesem Test wird geprüft, ob eine korrekte Exception geworfen wird, wenn der Benutzer nicht existiert
++    public async Task CheckUserNotFoundException()
++    {
++        string username = "nonexistentuser"; // Es wird ein Benutzername definiert, der nicht existiert
++        string newImageUrl = "http://localhost:8081/uploads/nonexistentuser.jpg"; // Eine Bild-URL wird definiert
++        var cancellationToken = CancellationToken.None; // Ein Abbruch-Token wird vorbereitet
++
++        var mockRepository = new Mock<IConduitRepository>(); // Das Repository wird gemockt
++        mockRepository.Setup(r => r.GetUserByUsernameAsync(username, cancellationToken))
++                      .ReturnsAsync((User?)null); // und wird so vorbereitet, dass kein Benutzer gefunden wird
++
++        var handler = new ProfilesHandler(mockRepository.Object); // Der Profile-Handler wird mit dem Mock-Repository erstellt
++
++        var act = async () => await handler.UpdateUserImageAsync(username, newImageUrl, cancellationToken); // Die Methode wird vorbereitet, um die Exception zu prüfen
++
++        var exception = await Assert.ThrowsAsync<ProblemDetailsException>(act); // Hier wird geprüft, ob die Methode die erwartete Exception wirft
++        exception.Details.Status.Should().Be(404); // ob der Statuscode der Exception korrekt ist
++        exception.Details.Title.Should().Be("User not found"); // und, ob die Fehlermeldung korrekt ist
++
++        mockRepository.Verify(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never); // Am Ende wird es auch geprüft, dass SaveChangesAsync nicht aufgerufen wurde
++    }
++}
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/tst/Unit.Tests/Unit.Tests.sln M4_abgabe/repo/apps/dotnet/tst/Unit.Tests/Unit.Tests.sln
+--- a/apps/dotnet/tst/Unit.Tests/Unit.Tests.sln	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/dotnet/tst/Unit.Tests/Unit.Tests.sln	2025-07-04 17:53:31.000000000 +0200
+@@ -0,0 +1,24 @@
++Microsoft Visual Studio Solution File, Format Version 12.00
++# Visual Studio Version 17
++VisualStudioVersion = 17.5.2.0
++MinimumVisualStudioVersion = 10.0.40219.1
++Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Unit.Tests", "Unit.Tests.csproj", "{87635E2D-1384-137C-4573-3D6EBEFB63D2}"
++EndProject
++Global
++	GlobalSection(SolutionConfigurationPlatforms) = preSolution
++		Debug|Any CPU = Debug|Any CPU
++		Release|Any CPU = Release|Any CPU
++	EndGlobalSection
++	GlobalSection(ProjectConfigurationPlatforms) = postSolution
++		{87635E2D-1384-137C-4573-3D6EBEFB63D2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
++		{87635E2D-1384-137C-4573-3D6EBEFB63D2}.Debug|Any CPU.Build.0 = Debug|Any CPU
++		{87635E2D-1384-137C-4573-3D6EBEFB63D2}.Release|Any CPU.ActiveCfg = Release|Any CPU
++		{87635E2D-1384-137C-4573-3D6EBEFB63D2}.Release|Any CPU.Build.0 = Release|Any CPU
++	EndGlobalSection
++	GlobalSection(SolutionProperties) = preSolution
++		HideSolutionNode = FALSE
++	EndGlobalSection
++	GlobalSection(ExtensibilityGlobals) = postSolution
++		SolutionGuid = {A8BC3099-BB52-4D28-89E1-4996D1C173D5}
++	EndGlobalSection
++EndGlobal
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/config/constant.dart M4_abgabe/repo/apps/flutter/lib/config/constant.dart
+--- a/apps/flutter/lib/config/constant.dart	2025-06-16 17:32:09.000000000 +0200
++++ b/apps/flutter/lib/config/constant.dart	2025-07-04 17:53:31.000000000 +0200
+@@ -29,6 +29,11 @@
+   /*#20*/ static const ARTICLE_BY_TAG = BASE_URL + SUB_URL + "/articles?tag=";
+   /*#21*/ static const SEARCH_QUERY = BASE_URL + SUB_URL + "/search?query=";
+ 
++  //-----------------------------
++  /*#22*/ static const String UPLOAD_ARTICLE_IMAGE = BASE_URL +
++      "/articles"; // Basis-URL für das Hochladen von Bildern zu einem bestimmten Artikel (z. B. http://localhost:8081/articles/{slug}/images)
++  //-----------------------------
++
+   static const TOKEN =
+       "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiaWdnb29zZTE4MyIsIm5iZiI6MTcxNTc4NzYyNCwiZXhwIjoxNzE1NzkxMjI0LCJpc3MiOiJ0aGVjbGllbnRpZCIsImF1ZCI6Imh0dHBzOi8vQUFBU19QTEFURk9STS9pZHAvWU9VUl9URU5BTlQvYXV0aG4vdG9rZW4ifQ.sbAL4D2aHD02NeLZPorTvhllA4lkulAMUpchM6j6nanes7ISTevjcEawJt3c8R2arEivN0-hnq69U4Osyxq410_g8FYoUwhBMkcIu50_8gUDYIY56MB3IVBkcbQ5_JTgBZY_xjIFtIfbkCm0nr8_LFob8ErGlc5cdPFWpEWnwbUSFIBI7CQMSNCBjzitv2FLY0aWXid6R4GMW6MZy7n1m9jCnrFnuJr_k0oyoC7ceRYuHkiZgxcbuqOsqDjl3md1E8bcBCMgu1SUxqf9R_SzgNqOpbkpJ3Xwfo4kHKtZpiK7AQO_GXc5Pyozj06oqE3gfYsjJ0iBwx0Dwm1uAup19A";
+ }
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/repository/all_article_repo.dart M4_abgabe/repo/apps/flutter/lib/repository/all_article_repo.dart
+--- a/apps/flutter/lib/repository/all_article_repo.dart	2025-06-16 17:32:09.000000000 +0200
++++ b/apps/flutter/lib/repository/all_article_repo.dart	2025-07-04 17:53:31.000000000 +0200
+@@ -32,6 +32,7 @@
+   Future<dynamic> followUser(String username);
+   Future<dynamic> unFollowUser(String username);
+   Future<dynamic> fetchSearchKWs(String title, int offset, int limit);
++  Future<String?> uploadImage(String slug, String filePath);
+ }
+ 
+ class AllArticlesImpl extends AllArticlesRepo {
+@@ -41,17 +42,9 @@
+     String url = ApiConstant.ALL_ARTICLES + "?offset=$offset&limit=$limit";
+     http.Response response = await UserClient.instance.doGet(url);
+     Map<String, dynamic> jsonData = json.decode(response.body);
+-    // dynamic jsonData =jsonDecode(response.body);
+-    if (response.statusCode == 401) {
+-      dynamic data = response.body;
+-      return data;
+-    }
+     if (response.statusCode == 200) {
+-      // dynamic data = jsonDecode(jsonData);
+       List<dynamic> data = jsonData["articles"];
+-      List<AllArticlesModel> s =
+-          List.from((data).map((e) => AllArticlesModel.fromJson(e)));
+-      return s;
++      return List.from((data).map((e) => AllArticlesModel.fromJson(e)));
+     } else {
+       throw Exception();
+     }
+@@ -63,41 +56,31 @@
+     String url = ApiConstant.YOUR_FEED + "?offset=$offset&limit=$limit";
+     http.Response response = await UserClient.instance.doGet(url);
+     Map<String, dynamic> jsonData = json.decode(response.body);
+-    if (response.statusCode == 401) {
+-      dynamic data = response.body;
+-      return data;
+-    }
+     if (response.statusCode == 200) {
+       List<dynamic> data = jsonData["articles"];
+-      List<AllArticlesModel> s =
+-          List.from((data).map((e) => AllArticlesModel.fromJson(e)));
+-      return s;
++      return List.from((data).map((e) => AllArticlesModel.fromJson(e)));
+     } else {
+       throw Exception();
+     }
+   }
+ 
++  @override
+   Future<List<AllArticlesModel>> getMyArticles(int offset, int limit) async {
+     Box<UserAccessData>? detailModel = await hiveStore.isExistUserAccessData();
+     String url = ApiConstant.MY_ARTICLES +
+         "${detailModel?.values.first.userName}" +
+         "&offset=$offset&limit=$limit";
+-    // print(url);
+     http.Response response = await UserClient.instance.doGet(url);
+     Map<String, dynamic> jsonData = json.decode(response.body);
+-    // int totalCount = jsonData['articlesCount'];
+-    // print(totalCount);
+-    // Map<String, dynamic> jsonData = json.decode(response.body);
+     if (response.statusCode == 200) {
+       List<dynamic> data = jsonData["articles"];
+-      List<AllArticlesModel> s =
+-          List.from((data).map((e) => AllArticlesModel.fromJson(e)));
+-      return s;
++      return List.from((data).map((e) => AllArticlesModel.fromJson(e)));
+     } else {
+       throw Exception();
+     }
+   }
+ 
++  @override
+   Future<List<AllArticlesModel>> getMyFavoriteArticles(
+       int offset, int limit) async {
+     Box<UserAccessData>? detailModel = await hiveStore.isExistUserAccessData();
+@@ -108,349 +91,240 @@
+     Map<String, dynamic> jsonData = json.decode(response.body);
+     if (response.statusCode == 200) {
+       List<dynamic> data = jsonData["articles"];
+-      List<AllArticlesModel> s =
+-          List.from((data).map((e) => AllArticlesModel.fromJson(e)));
+-      return s;
++      return List.from((data).map((e) => AllArticlesModel.fromJson(e)));
+     } else {
+       throw Exception();
+     }
+   }
+ 
++  @override
+   Future addNewArticle(ArticleModel newArticleModel) async {
+     String url = ApiConstant.ADD_ARTICLE;
+     Map<String, dynamic> body = newArticleModel.toJson();
+     http.Response response = await UserClient.instance.doPostArticle(url, body);
+-    // print(body);
+-    dynamic jsonData = jsonDecode(response.body);
+-    String message = '';
+-    if (jsonData['errors'] != null) {
+-      Map<String, dynamic> errors = jsonData['errors'];
+-      String fieldName = errors.keys.first;
+-      String errorValue = errors[fieldName][0];
+-      message = '$fieldName $errorValue';
+-    }
+-    // for error text shoe only
+-    // if (jsonData['errors'] != null) {
+-    //   Map<String, dynamic> errors = jsonData['errors'];
+-    //   String fieldName = errors.keys.first;
+-    //   errorMessage = errors[fieldName][0];
+-    //   // Remove unnecessary parts
+-    //   errorMessage = errorMessage
+-    //       .replaceAll('{"$fieldName":', '')
+-    //       .replaceAll('[', '')
+-    //       .replaceAll(']', '')
+-    //       .replaceAll('"', '');
+-    // }
+-    if (response.statusCode == 201) {
+-      // dynamic jsonData = jsonDecode(response.body);
+-      return response.reasonPhrase.toString();
+-    } else if (response.statusCode == 403) {
+-      throw message;
+-    } else {
+-      throw message;
+-    }
++    return response.statusCode == 201
++        ? response.reasonPhrase
++        : throw Exception();
+   }
+ 
++  //Backend-Kommunikation, Daten schicken oder holen
++  @override
++  //--1/4------------------------------------------------
++  // Ruft die vollständigen Artikeldaten (inklusive Markdown-Inhalt) von einem bestimmten Artikel aus dem Backend ab.
+   Future<List<ArticleModel>> getArticle(String slug) async {
+-    String url = ApiConstant.GET_ARTICLE + "/${slug}";
+-    // print(url);
+-    http.Response response = await UserClient.instance.doGet(url);
+-    Map<String, dynamic> jsonData = json.decode(response.body);
++    String url = ApiConstant.GET_ARTICLE +
++        "/$slug"; // Baut die vollständige URL zusammen, um den gewünschten Artikel anhand seines Slugs abzurufen
++    http.Response response = await UserClient.instance.doGet(
++        url); // Sendet einen GET-Request an das Backend, um die Artikeldaten abzurufen
+     if (response.statusCode == 200) {
+-      ArticleModel articleModel = ArticleModel.fromJson(jsonData);
+-      return [articleModel];
+-      // dynamic data = jsonDecode(jsonData);
+-      // List<dynamic> data = jsonData["articles"];
+-      // List<ArticleModel> s =
+-      //     List.from((data).map((e) => ArticleModel.fromJson(e)));
+-      // return s;
++      //wenn Server mit Erfolg geantwortet hat
++      return [
++        ArticleModel.fromJson(json.decode(response.body))
++      ]; // Wandelt die JSON-Antwort in ein Artikelobjekt um und gibt es als Liste zurück
+     } else {
+-      throw Exception();
++      throw Exception(); // Bei Fehler (z. B. Artikel nicht gefunden) wird eine Exception ausgelöst
+     }
+   }
++  //--------------------------------------------------
+ 
++  @override
++  //--2/4------------------------------------------------
++  // Aktualisiert die Daten eines bestehenden Artikels im Backend, inklusive Titel, Beschreibung, Inhalt (Markdown) und Tags.
+   Future updateArticle(ArticleModel newArticleModel, String slug) async {
+-    String url = ApiConstant.UPDATE_ARTICLE + "/${slug}";
+-    Map<String, dynamic> body = newArticleModel.toJson();
+-    http.Response response =
+-        await UserClient.instance.doUpdateArticle(url, body);
+-    // print(body);
+-    dynamic jsonData = jsonDecode(response.body);
+-    String message = '';
+-    if (jsonData['errors'] != null) {
+-      Map<String, dynamic> errors = jsonData['errors'];
+-      String fieldName = errors.keys.first;
+-      String errorValue = errors[fieldName][0];
+-      message = '$fieldName $errorValue';
+-    }
+-    if (response.statusCode == 200) {
+-      return message;
+-    } else if (response.statusCode == 403) {
+-      throw message;
+-    } else {
+-      throw message;
+-    }
++    String url = ApiConstant.UPDATE_ARTICLE +
++        "/$slug"; // Baut die URL zusammen, um den spezifischen Artikel anhand seines Slugs zu aktualisieren
++    Map<String, dynamic> body = newArticleModel
++        .toJson(); // Wandelt das übergebene Artikelobjekt in ein JSON-Format um, um es an das Backend zu schicken
++    http.Response response = await UserClient.instance.doUpdateArticle(url,
++        body); // Sendet die aktualisierten Artikeldaten als PUT-Request an das Backend
++    return response.statusCode == 200
++        ? "Success"
++        : throw Exception(); // Gibt "Success" zurück, wenn das Backend den Artikel erfolgreich gespeichert hat, sonst wird eine Exception geworfen
+   }
++  //--------------------------------------------------
+ 
++  @override
+   Future<String> addComment(
+       AddCommentModel addCommentModel, String slug) async {
+     String url =
+-        ApiConstant.BASE_COMMENT_URL + "/${slug}" + ApiConstant.END_COMMENT_URL;
+-    // print(url);
+-    Map<String, dynamic> body = addCommentModel.toJson();
+-    http.Response response = await UserClient.instance.doPostComment(url, body);
+-    // print(body);
+-    dynamic jsonData = jsonDecode(response.body);
+-    String message = '';
+-    if (jsonData['errors'] != null) {
+-      Map<String, dynamic> errors = jsonData['errors'];
+-      String fieldName = errors.keys.first;
+-      String errorValue = errors[fieldName][0];
+-      message = '$fieldName $errorValue';
+-    }
+-    if (response.statusCode == 200) {
+-      // dynamic jsonData = jsonDecode(response.body);
+-      return response.reasonPhrase.toString();
+-    } else if (response.statusCode == 403) {
+-      throw message;
+-    } else {
+-      throw message;
+-    }
++        ApiConstant.BASE_COMMENT_URL + "/$slug" + ApiConstant.END_COMMENT_URL;
++    http.Response response =
++        await UserClient.instance.doPostComment(url, addCommentModel.toJson());
++    return response.statusCode == 200 ? "Success" : throw Exception();
+   }
+ 
++  @override
+   Future<List<CommentModel>> getComment(String slug) async {
+     String url =
+-        ApiConstant.BASE_COMMENT_URL + "/${slug}" + ApiConstant.END_COMMENT_URL;
+-    // print(url);
++        ApiConstant.BASE_COMMENT_URL + "/$slug" + ApiConstant.END_COMMENT_URL;
+     http.Response response = await UserClient.instance.doGet(url);
+-    Map<String, dynamic> jsonData = json.decode(response.body);
+-    // dynamic jsonData =jsonDecode(response.body);
+     if (response.statusCode == 200) {
+-      // dynamic data = jsonDecode(jsonData);
+-      List<dynamic> data = jsonData["comments"];
+-      // print(data);
+-      List<CommentModel> s = List<CommentModel>.from(
+-          data.map((e) => CommentModel.fromJson(e as Map<String, dynamic>)));
+-      return s;
++      List<dynamic> data = json.decode(response.body)["comments"];
++      return List<CommentModel>.from(data.map((e) => CommentModel.fromJson(e)));
+     } else {
+       throw Exception();
+     }
+   }
+ 
++  @override
+   Future<bool> deleteArticle(String slug) async {
+-    String url = ApiConstant.BASE_COMMENT_URL + "/${slug}";
++    String url = ApiConstant.BASE_COMMENT_URL + "/$slug";
+     http.Response response = await UserClient.instance.doDelete(url);
+-    // Map<String, dynamic> jsonData = json.decode(response.body);
+-    // dynamic jsonData =jsonDecode(response.body);
+-    if (response.statusCode == 204) {
+-      return true;
+-    } else if (response.statusCode == 200 || response.statusCode == 202) {
+-      return true;
+-    } else {
+-      throw Exception();
+-    }
++    return response.statusCode == 204 || response.statusCode == 200;
+   }
+ 
++  @override
+   Future<int> deleteComment(int commentId, String slug) async {
+     String url = ApiConstant.BASE_COMMENT_URL +
+-        "/${slug}" +
++        "/$slug" +
+         ApiConstant.END_COMMENT_URL +
+-        "/${commentId}";
+-    // print("created url is :: $url");
++        "/$commentId";
+     http.Response response = await UserClient.instance.doDelete(url);
+-    if (response.statusCode == 200) {
+-      return 1;
+-    } else {
+-      throw Exception('Failed to delete comment');
+-    }
++    return response.statusCode == 200 ? 1 : throw Exception();
+   }
+ 
+   @override
+   Future<List<ProfileModel>> getProfileData() async {
+     String url = ApiConstant.USER_PROFILE;
+     http.Response response = await UserClient.instance.doGet(url);
+-    Map<String, dynamic> jsonData = json.decode(response.body);
+     if (response.statusCode == 200) {
+-      ProfileModel profile = ProfileModel.fromJson(jsonData);
+-      return [profile];
++      return [ProfileModel.fromJson(json.decode(response.body))];
+     } else {
+       throw Exception();
+     }
+   }
+ 
++  @override
+   Future updateProfile(ProfileModel profileModel) async {
+     String url = ApiConstant.UPDATE_USER;
+     Map<String, dynamic> body = profileModel.toJson();
+     http.Response response =
+         await UserClient.instance.doUpdateProfile(url, body);
+-    // print("updateProfile main repo body ==> ${response.body}");
+-    dynamic jsonResponse = jsonDecode(response.body);
+-    dynamic jsonData=jsonResponse['user'];
+-    String message = '';
+-    if (jsonResponse['errors'] != null) {
+-      Map<String, dynamic> errors = jsonResponse['errors'];
+-      String fieldName = errors.keys.first;
+-      String errorValue = errors[fieldName][0];
+-      message = '$fieldName $errorValue';
+-    }
+-    if (response.statusCode == 200) {
+-      await hiveStore.updateSession(
+-        email: jsonData["email"],
+-        userName: jsonData["username"],
+-        bio: jsonData["bio"],
+-        image: jsonData["image"],
+-        token: jsonData["token"],
+-      );
+-      return response.body;
+-    } else if (response.statusCode == 403) {
+-      throw message;
+-    } else {
+-      throw message;
+-    }
++    return response.statusCode == 200 ? "Success" : throw Exception();
+   }
+ 
++  @override
+   Future changePassword(ProfileModel profileModel) async {
+     String url = ApiConstant.UPDATE_USER;
+     Map<String, dynamic> body = profileModel.toJson();
+     http.Response response =
+         await UserClient.instance.doChangePassword(url, body);
+-    // print("password main repo body ==> ${response.body}");
+-    dynamic jsonData = jsonDecode(response.body);
+-    String message = '';
+-    if (jsonData['errors'] != null) {
+-      Map<String, dynamic> errors = jsonData['errors'];
+-      String fieldName = errors.keys.first;
+-      String errorValue = errors[fieldName][0];
+-      message = '$fieldName $errorValue';
+-    }
+-    if (response.statusCode == 200) {
+-      return true;
+-    } else if (response.statusCode == 403) {
+-      throw message;
+-    } else {
+-      throw message;
+-    }
++    return response.statusCode == 200;
+   }
+ 
++  @override
+   Future fetchAllTags() async {
+     String url = ApiConstant.ALL_POPULAR_TAGS;
+     http.Response response = await UserClient.instance.doGet(url);
+-    // Map<String, dynamic> jsonData = json.decode(response.body);
+-    // if (response.statusCode == 401) {}
+     if (response.statusCode == 200) {
+-      List<dynamic> jsonData = json.decode(response.body)["tags"];
+-      List<String> tagsList = List.from(jsonData.map((tagData) {
+-        return tagData.toString();
+-      }));
+-      return tagsList;
++      return List<String>.from(json.decode(response.body)["tags"]);
+     } else {
+-      throw Exception("Failed to fetch tags");
++      throw Exception();
+     }
+   }
+ 
++  @override
+   Future fetchSearchTags(String title) async {
+-    Box<UserAccessData>? detailModel = await hiveStore.isExistUserAccessData();
+     String url = ApiConstant.ARTICLE_BY_TAG + title;
+     http.Response response = await UserClient.instance.doGet(url);
+-    Map<String, dynamic> jsonData = json.decode(response.body);
+-    // print(totalCount);
+-    // Map<String, dynamic> jsonData = json.decode(response.body);
+     if (response.statusCode == 200) {
+-      List<dynamic> data = jsonData["articles"];
+-      List<AllArticlesModel> s =
+-          List.from((data).map((e) => AllArticlesModel.fromJson(e)));
+-      return s;
++      List<dynamic> data = json.decode(response.body)["articles"];
++      return List<AllArticlesModel>.from(
++          data.map((e) => AllArticlesModel.fromJson(e)));
+     } else {
+       throw Exception();
+     }
+   }
+ 
++  @override
+   Future likeArticle(String slug) async {
+     Box<UserAccessData>? detailModel = await hiveStore.isExistUserAccessData();
+-    String url = ApiConstant.LIKE_ARTICLE + slug + "/favorite";
+-    // print(url);
+-    http.Response response = await http.post(
+-      Uri.parse(url),
+-      headers: {
+-        "content-type": "application/json",
+-        "Authorization": "Token ${detailModel!.values.first.token}"
+-      },
+-    );
+-    // print(response.body);
+-    print(detailModel.values.first.token);
+-    if (response.statusCode == 200) {
+-      return true;
+-    } else {
+-      throw Exception('Failed to like article');
+-    }
++    String url = ApiConstant.LIKE_ARTICLE + "$slug/favorite";
++    http.Response response = await http.post(Uri.parse(url), headers: {
++      "content-type": "application/json",
++      "Authorization": "Token ${detailModel!.values.first.token}"
++    });
++    return response.statusCode == 200;
+   }
+ 
++  @override
+   Future removeLikeArticle(String slug) async {
+-    String url = ApiConstant.LIKE_ARTICLE + slug + "/favorite";
+-    // print(url);
++    String url = ApiConstant.LIKE_ARTICLE + "$slug/favorite";
+     http.Response response = await UserClient.instance.doDelete(url);
+-    // print(response.body);
+-    if (response.statusCode == 200) {
+-      return true;
+-    } else {
+-      throw Exception('Failed to unlike article');
+-    }
++    return response.statusCode == 200;
+   }
+ 
+-  Future followUser(String slug) async {
++  @override
++  Future followUser(String username) async {
+     Box<UserAccessData>? detailModel = await hiveStore.isExistUserAccessData();
+-    String url = ApiConstant.FOLLOW_USER + slug + "/follow";
+-    // print(url);
+-    http.Response response = await http.post(
+-      Uri.parse(url),
+-      headers: {
+-        "content-type": "application/json",
+-        "Authorization": "Token ${detailModel!.values.first.token}"
+-      },
+-    );
+-    // print(response.body);
+-    // print(detailModel.values.first.token);
+-    if (response.statusCode == 200) {
+-      return true;
+-    } else {
+-      throw Exception('Failed to follow user');
+-    }
++    String url = ApiConstant.FOLLOW_USER + "$username/follow";
++    http.Response response = await http.post(Uri.parse(url), headers: {
++      "content-type": "application/json",
++      "Authorization": "Token ${detailModel!.values.first.token}"
++    });
++    return response.statusCode == 200;
+   }
+ 
++  @override
+   Future unFollowUser(String username) async {
+-    String url = ApiConstant.FOLLOW_USER + username + "/follow";
+-    // print(url);
++    String url = ApiConstant.FOLLOW_USER + "$username/follow";
+     http.Response response = await UserClient.instance.doDelete(url);
+-    // print(response.body);
+-    if (response.statusCode == 200) {
+-      return true;
+-    } else {
+-      throw Exception(
+-        'Failed to unfollow user',
+-      );
+-    }
++    return response.statusCode == 200;
+   }
+ 
+   @override
+   Future fetchSearchKWs(String title, int? offset, int? limit) async {
+-    Box<UserAccessData>? detailModel = await hiveStore.isExistUserAccessData();
+-    String url = ApiConstant.SEARCH_QUERY + title + "&offset=$offset&limit=$limit";
++    String url =
++        ApiConstant.SEARCH_QUERY + title + "&offset=$offset&limit=$limit";
+     http.Response response = await UserClient.instance.doGet(url);
+-    while(response.statusCode == 500){
+-      // wait
+-      await Future.delayed(Duration(milliseconds: 500));
+-      response = await UserClient.instance.doGet(url);
+-    }
+-    Map<String, dynamic> jsonData = json.decode(response.body);
+-    // print(totalCount);
+-    // Map<String, dynamic> jsonData = json.decode(response.body);
+     if (response.statusCode == 200) {
+-      List<dynamic> data = jsonData["articles"];
+-      List<AllArticlesModel> s =
+-      List.from((data).map((e) => AllArticlesModel.fromJson(e)));
+-      return s;
++      List<dynamic> data = json.decode(response.body)["articles"];
++      return List<AllArticlesModel>.from(
++          data.map((e) => AllArticlesModel.fromJson(e)));
+     } else {
+       throw Exception();
+     }
+   }
++
++  @override
++  //--3/4--------------------------------------------------------
++  // Lädt ein einzelnes Bild für einen bestehenden Artikel hoch und gibt die Bild-URL zurück.
++  Future<String?> uploadImage(String slug, String filePath) async {
++    final file = await http.MultipartFile.fromPath('file',
++        filePath); // Erstellt die Bild-Datei als MultipartFile aus dem lokalen Dateipfad
++    final imageUrls = await uploadArticleImages(slug, [
++      file
++    ]); // Ruft die Methode auf, die den eigentlichen Upload durchführt und gibt eine Liste der Bild-URLs zurück
++    return imageUrls.isNotEmpty
++        ? imageUrls.first
++        : null; // Gibt die erste Bild-URL zurück, falls mindestens ein Bild erfolgreich hochgeladen wurde, sonst null
++  }
++  //----------------------------------------------------------
++
++  //--4/4--------------------------------------------------------
++  // Führt den eigentlichen Upload-Prozess für eine oder mehrere Bilddateien zum Artikel durch und liefert die Liste der Bild-URLs vom Backend.
++  Future<List<String>> uploadArticleImages(
++      String slug, List<http.MultipartFile> files) async {
++    final uri = Uri.parse(ApiConstant.UPLOAD_ARTICLE_IMAGE +
++        "/$slug/images"); // Baut die vollständige URL zum Artikel-Bild-Upload-Endpunkt zusammen
++    Box<UserAccessData>? detailModel = await hiveStore
++        .isExistUserAccessData(); // Holt die gespeicherten Benutzerdaten aus Hive (insbesondere den Authentifizierungs-Token)
++    final request = http.MultipartRequest('POST', uri)
++      ..headers['Authorization'] =
++          'Token ${detailModel!.values.first.token}' // Fügt den Token zum Request-Header hinzu, um sich am Backend zu authentifizieren
++      ..files.addAll(
++          files); // Hängt die übergebenen Bilddateien an die HTTP-Anfrage an
++    final response = await request
++        .send(); // Sendet die vollständige Anfrage mit Header und Dateien an das Backend
++    if (response.statusCode == 200) {
++      // beim erfolgreichen Upload
++      final responseBody = await response.stream
++          .bytesToString(); // Liest den Antwort-Body als String aus dem zurückgegebenen Stream
++      return List<String>.from(json.decode(responseBody)[
++          'uploaded']); // Wandelt den JSON-String in ein Objekt um und extrahiert die Liste der hochgeladenen Bild-URLs
++    } else {
++      throw Exception(); // Falls ein anderer Statuscode zurückkommt, wird eine allgemeine Exception ausgelöst
++    }
++  }
++  //----------------------------------------------------------
+ }
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/ui/add_article/add_article_screen.dart M4_abgabe/repo/apps/flutter/lib/ui/add_article/add_article_screen.dart
+--- a/apps/flutter/lib/ui/add_article/add_article_screen.dart	2025-06-16 17:32:09.000000000 +0200
++++ b/apps/flutter/lib/ui/add_article/add_article_screen.dart	2025-07-04 17:53:31.000000000 +0200
+@@ -1,449 +1,277 @@
++import 'dart:convert';
++import 'dart:io';
++
++import 'package:flutter/cupertino.dart';
++import 'package:flutter/material.dart';
++import 'package:file_picker/file_picker.dart';
++import 'package:flutter_markdown/flutter_markdown.dart';
++import 'package:http/http.dart' as http;
++
++import 'package:conduit/utils/AppColors.dart';
+ import 'package:conduit/bloc/article_bloc/article_bloc.dart';
+ import 'package:conduit/bloc/article_bloc/article_event.dart';
+-import 'package:conduit/bloc/article_bloc/article_state.dart';
+-import 'package:conduit/config/constant.dart';
+-import 'package:conduit/main.dart';
+ import 'package:conduit/model/new_article_model.dart';
+-import 'package:conduit/navigator/tab_items.dart';
+-import 'package:conduit/ui/base/base_screen.dart';
+-import 'package:conduit/ui/global/global_item_detail_screen.dart';
+-import 'package:conduit/utils/AppColors.dart';
+-import 'package:conduit/utils/functions.dart';
+-import 'package:conduit/utils/image_string.dart';
+-import 'package:conduit/utils/message.dart';
+-import 'package:conduit/widget/conduitEditText_widget.dart';
+-import 'package:conduit/utils/theme_container.dart';
+-import 'package:flutter/cupertino.dart';
+-import 'package:flutter/material.dart';
+-import 'package:flutter/services.dart';
+ import 'package:flutter_bloc/flutter_bloc.dart';
+-import 'package:flutter_svg/svg.dart';
++import 'package:conduit/config/hive_store.dart';
++import 'package:conduit/model/user_model.dart';
++import 'package:hive/hive.dart';
++import 'package:flutter/foundation.dart' show kIsWeb;
+ 
+ class AddArticleScreen extends StatefulWidget {
+   static const addArticleUrl = '/addArticle';
+-  AddArticleScreen({
++  final bool isUpdateArticle;
++  final String? slug;
++
++  const AddArticleScreen({
+     Key? key,
+     required this.isUpdateArticle,
+     this.slug,
+   }) : super(key: key);
+-  bool isUpdateArticle;
+-  String? slug;
+ 
+   @override
+   State<AddArticleScreen> createState() => _AddArticleScreenState();
+ }
+ 
+ class _AddArticleScreenState extends State<AddArticleScreen> {
+-  GlobalKey<FormState> _form = GlobalKey<FormState>();
+-
+-  bool isVisible = false;
+-  // String? title, aboutTitle, article;
+-  // String? apiSlug;
+-  TextEditingController? titleCtr, aboutTitleCtr, articleCtr;
+-  TextEditingController? tagsCtr;
++  final GlobalKey<FormState> _form = GlobalKey<FormState>();
++  late TextEditingController titleCtr, aboutTitleCtr, articleCtr;
++  final List<String> tags = [];
++  bool isUploading = false;
+   late ArticleBloc articleBloc;
+-  List<String> tags = [];
+-  ArticleModel? articleModel;
+-  bool isEdited = false;
+ 
+-  bool isNoInternet = false;
+   @override
+   void initState() {
+     super.initState();
+-
+     articleBloc = context.read<ArticleBloc>();
+-
+-    if (widget.isUpdateArticle) {
+-      articleBloc.add(FetchArticleEvent(slug: widget.slug!));
+-      addData();
+-    } else {
+-      titleCtr = TextEditingController();
+-      aboutTitleCtr = TextEditingController();
+-      articleCtr = TextEditingController();
+-    }
+-    tagsCtr = TextEditingController();
++    titleCtr = TextEditingController();
++    aboutTitleCtr = TextEditingController();
++    articleCtr = TextEditingController();
+   }
+ 
+-  void addData() {
+-    titleCtr = TextEditingController(text: articleModel?.article?.title);
+-    aboutTitleCtr =
+-        TextEditingController(text: articleModel?.article?.description);
+-    articleCtr = TextEditingController(text: articleModel?.article?.body);
++  // Upload-Image logik und Bild automatisch Markdown einfügen
++  //--1/4-------------------------------------
++  // Diese Methode öffnet einen Dateiauswahldialog, damit der Benutzer ein Bild auswählen kann.
++  // Nach erfolgreichem Upload wird die Bild-URL automatisch im Markdown-Format in das Textfeld eingefügt,
++  // sodass das Bild anschließend in der Markdown-Vorschau gerendert wird.
++  Future<void> uploadImageAndInsertMarkdown() async {
++    try {
++      final result = await FilePicker.platform.pickFiles(
++        type: FileType.image, // Nur Bilddateien dürfen ausgewählt werden
++        withData:
++            true, // Die Bilddaten sollen direkt als Bytes mitgeliefert werden
++      );
++
++      if (result == null || result.files.single.bytes == null) {
++        debugPrint(
++            " No image selected or no bytes found."); // Fehlermeldung in der Konsole
++        return; // Methode abbrechen, wenn kein Bild ausgewählt wurde
++      }
++
++      final fileBytes = result.files.single.bytes!; // Bilddaten als Byte-Array
++      final fileName =
++          result.files.single.name; // Ursprünglicher Dateiname des Bildes
++
++      final box = await hiveStore
++          .isExistUserAccessData(); // Benutzer-Daten (inkl. Auth-Token) aus Hive holen
++      final token =
++          box?.values.first.token; // Authentifizierungs-Token extrahieren
++      final slug = widget.slug; // Slug des aktuellen Artikels
++
++      if (token == null || slug == null) {
++        // Wenn Token oder Slug fehlen, Fehlermeldung anzeigen
++        ScaffoldMessenger.of(context).showSnackBar(
++          const SnackBar(content: Text("Token or slug is missing.")),
++        );
++        return;
++      }
++
++      setState(() => isUploading =
++          true); // Lade-Status aktivieren (z.B. Button deaktivieren, Spinner anzeigen)
++
++      final uri = Uri.parse(
++          "http://localhost:8081/articles/$slug/images"); // Ziel-URL für den Bild-Upload
++      final request = http.MultipartRequest("POST", uri)
++        ..headers['Authorization'] =
++            'Token $token' // Authentifizierung per Token im Header mitschicken
++        ..files.add(http.MultipartFile.fromBytes('file', fileBytes,
++            filename: fileName)); // Bild als Multipart anhängen
++
++      debugPrint(" Uploading to $uri"); // Debug-Ausgabe zur Kontrolle
++
++      final response = await request.send(); // Anfrage an Backend senden
++      final body = await response.stream
++          .bytesToString(); // Antwort-Body in lesbaren Text umwandeln
++
++      debugPrint(
++          " Backend response: $body"); // Debug-Ausgabe der Backend-Antwort
++
++      if (response.statusCode == 200) {
++        // Wenn Upload erfolgreich
++        final json = jsonDecode(body); // Antwort als JSON parsen
++        final imageUrl = json['uploaded']; // Bild-URL auslesen
++
++        if (imageUrl is String && imageUrl.trim().isNotEmpty) {
++          debugPrint("Final image URL to embed: $imageUrl");
++
++          setState(() {
++            // Bild-URL im Markdown-Syntax ans Textfeld anhängen
++            articleCtr.text += '\n\n![Image]($imageUrl "Uploaded")\n\n';
++          });
++
++          // Erfolgreiche Meldung anzeigen
++          ScaffoldMessenger.of(context).showSnackBar(
++            const SnackBar(content: Text("Image uploaded and added.")),
++          );
++        } else {
++          // Ungültige Bild-URL vom Backend erhalten
++          debugPrint("Invalid imageUrl returned: $imageUrl");
++          ScaffoldMessenger.of(context).showSnackBar(
++            const SnackBar(content: Text("Invalid image URL returned.")),
++          );
++        }
++      } else {
++        // Upload fehlgeschlagen, Statuscode anzeigen
++        ScaffoldMessenger.of(context).showSnackBar(
++          SnackBar(content: Text("Upload failed: ${response.statusCode}")),
++        );
++      }
++    } catch (e) {
++      // Allgemeiner Fehlerfall
++      debugPrint(" Error: $e");
++      ScaffoldMessenger.of(context).showSnackBar(
++        const SnackBar(content: Text("Unexpected error occurred.")),
++      );
++    } finally {
++      setState(() => isUploading = false); // Lade-Status wieder deaktivieren
++    }
+   }
++  //---------------------------------------
+ 
+-  void clear() {
+-    setState(() {
+-      titleCtr!.clear();
+-      aboutTitleCtr!.clear();
+-      articleCtr!.clear();
+-      tagsCtr!.clear();
+-    });
+-  }
++  void submit() {
++    if (_form.currentState!.validate()) {
++      final model = ArticleModel(
++        article: Article(
++          title: titleCtr.text.trim(),
++          description: aboutTitleCtr.text.trim(),
++          body: articleCtr.text.trim(),
++          tagList: tags,
++        ),
++      );
+ 
+-  void addTag(String tag) {
+-    print(tag);
+-    setState(() {
+-      tags.add(tag);
+-      tagsCtr?.clear();
+-    });
++      if (widget.isUpdateArticle) {
++        articleBloc
++            .add(UpdateArticleEvent(articleModel: model, slug: widget.slug!));
++      } else {
++        articleBloc.add(SubmitArticleEvent(articleModel: model));
++      }
++    }
+   }
+ 
+   @override
+   Widget build(BuildContext context) {
+-    return GestureDetector(
+-      onTap: () {
+-        FocusManager.instance.primaryFocus!.unfocus();
+-      },
+-      child: WillPopScope(
+-        onWillPop: () async => true,
+-        child: Scaffold(
+-          backgroundColor: AppColors.white2,
+-          appBar: AppBar(
+-            backgroundColor: AppColors.primaryColor,
+-            centerTitle: false,
+-            leading: IconButton(
+-              onPressed: () async {
+-                if (widget.isUpdateArticle) {
+-                  Navigator.pop(context, isEdited ? true : false);
+-                } else {
+-                  bool isPop =
+-                      await navigatorKey[BaseScreen.getCurrentTab(context)]!
+-                          .currentState!
+-                          .maybePop();
+-                  if (!isPop) {
+-                    BaseScreen.switchTab(context, MyTabItem.globalfeed);
+-                  }
+-                }
+-              },
+-              icon: SvgPicture.asset(
+-                ic_back_arrow_icon,
+-                color: AppColors.white,
+-              ),
+-            ),
+-            title: Text(
+-              widget.isUpdateArticle ? "Update Article" : "Add Article",
+-              style: TextStyle(
+-                color: AppColors.white,
+-                fontFamily: ConduitFontFamily.robotoRegular,
+-              ),
+-            ),
++    return Scaffold(
++      appBar: AppBar(
++        backgroundColor: AppColors.primaryColor,
++        title: Text(widget.isUpdateArticle ? 'Update Article' : 'Add Article'),
++
++        // Upload-Image button UI
++        //--2/4-------------------------------
++        actions: [
++          IconButton(
++            key: const Key('uploadImageButton'),
++            icon: const Icon(Icons.image),
++            onPressed: isUploading ? null : uploadImageAndInsertMarkdown,
+           ),
+-          body: ThemeContainer(
+-            child: WillPopScope(
+-              onWillPop: () async => true,
+-              child: ScrollConfiguration(
+-                behavior: NoGlow(),
+-                child: SingleChildScrollView(
+-                  child: SafeArea(
+-                      child: BlocConsumer<ArticleBloc, ArticleState>(
+-                    listener: (context, state) {
+-                      if (state is ArticleLoadingState) {
+-                        CToast.instance.showLodingLoader(context);
+-                      }
+-                      if (state is ArticleNoInternetState) {
+-                        CToast.instance.dismiss();
+-                        CToast.instance.showError(context, NO_INTERNET);
+-                      }
+-                      // add article
+-                      if (state is ArticleAddSuccessState) {
+-                        clear();
+-                        CToast.instance.dismiss();
+-                        BaseScreen.switchTab(context, MyTabItem.globalfeed);
+-                        CToast.instance
+-                            .showSuccess(context, state.msg.toString());
+-                      }
+-                      if (state is ArticleAddErrorState) {
+-                        CToast.instance.dismiss();
+-                        CToast.instance
+-                            .showError(context, state.msg.toString());
+-                      }
+-
+-                      // update article
+-                      if (state is UpdateArticleSuccessState) {
+-                        CToast.instance.dismiss();
+-                        Navigator.pop(context, isEdited ? true : false);
+-                        // Navigator.popUntil(context, (route) => route.isFirst);
+-                        // Navigator.pushNamed(
+-                        //   context,
+-                        //   GlobalItemDetailScreen.globalItemDetailUrl,
+-                        //   arguments: {
+-                        //     'username': articleModel!.article!.author!.username,
+-                        //     'slug': articleModel!.article!.slug,
+-                        //   },
+-                        // );
+-                      }
+-                      if (state is ArticleLoadedState) {
+-                        articleModel = state.articleModel.last;
+-                        // title = state.articleModel.last.article?.title;
+-                        // aboutTitle =
+-                        //     state.articleModel.last.article?.description;
+-                        // article = state.articleModel.last.article?.body;
+-                        // apiSlug = state.articleModel.last.article!.slug;
+-                        tags = state.articleModel.last.article!.tagList!;
+-                        addData();
+-                        CToast.instance.dismiss();
+-                      }
+-                    },
+-                    builder: (context, state) {
+-                      return Form(
+-                        key: _form,
+-                        child: Container(
+-                          padding:
+-                              EdgeInsets.only(top: 20, right: 20, left: 20),
+-                          child: Column(
+-                            mainAxisAlignment: MainAxisAlignment.start,
+-                            crossAxisAlignment: CrossAxisAlignment.start,
+-                            children: [
+-                              SizedBox(
+-                                height: 20,
+-                              ),
+-                              Text(
+-                                "Title*",
+-                                style: TextStyle(
+-                                  fontFamily: ConduitFontFamily.robotoLight,
+-                                ),
+-                              ),
+-                              SizedBox(
+-                                height: 10,
+-                              ),
+-                              ConduitEditText(
+-                                controller: titleCtr,
+-                                maxLines: 1,
+-                                hint: "Article title",
+-                                textInputType: TextInputType.text,
+-                                inputFormatters: [
+-                                  LengthLimitingTextInputFormatter(150),
+-                                ],
+-                                validator: (value) {
+-                                  if (value == null || value.isEmpty) {
+-                                    return 'Enter a title';
+-                                  }
+-                                  return null;
+-                                },
+-                              ),
+-                              SizedBox(
+-                                height: 20,
+-                              ),
+-                              Text(
+-                                "About*",
+-                                style: TextStyle(
+-                                  fontFamily: ConduitFontFamily.robotoLight,
+-                                ),
+-                              ),
+-                              SizedBox(
+-                                height: 10,
+-                              ),
+-                              ConduitEditText(
+-                                controller: aboutTitleCtr,
+-                                hint: "About?",
+-                                maxLines: 2,
+-                                minLines: 1,
+-                                textInputType: TextInputType.text,
+-                                inputFormatters: [
+-                                  LengthLimitingTextInputFormatter(150)
+-                                ],
+-                                validator: (value) {
+-                                  if (value == null || value.isEmpty) {
+-                                    return "Enter article's about";
+-                                  }
+-                                  return null;
+-                                },
+-                              ),
+-                              SizedBox(
+-                                height: 20,
+-                              ),
+-                              Text(
+-                                "Your article*",
+-                                style: TextStyle(
+-                                  fontFamily: ConduitFontFamily.robotoLight,
+-                                ),
+-                              ),
+-                              SizedBox(
+-                                height: 10,
+-                              ),
+-                              ConduitEditText(
+-                                maxLines: 8,
+-                                minLines: 5,
+-                                controller: articleCtr,
+-                                hint: "Your article ( in markdown )",
+-                                textInputType: TextInputType.text,
+-                                validator: (value) {
+-                                  if (value == null || value.isEmpty) {
+-                                    return 'Please enter article';
+-                                  }
+-                                  return null;
+-                                },
+-                              ),
+-                              SizedBox(
+-                                height: 20,
+-                              ),
+-                              Visibility(
+-                                visible: isVisible,
+-                                child: Container(
+-                                  decoration: BoxDecoration(
+-                                      color: AppColors.white,
+-                                      border: Border.all(
+-                                          color: AppColors.primaryColor),
+-                                      borderRadius: BorderRadius.circular(10)),
+-                                  padding: EdgeInsets.all(10),
+-                                  child: Text(
+-                                    "1. Start typing the tag you want to create.\n\n"
+-                                    "2. After typing the tag, press the 'Done' or 'Next' button on your keyboard.\n\n"
+-                                    "3. The tag you typed will automatically be converted into a tag and added to the list of tags below the input field.\n\n"
+-                                    "4. You can continue typing and creating more tags using the same method.",
+-                                    style: TextStyle(
+-                                        fontFamily:
+-                                            ConduitFontFamily.robotoLight),
+-                                  ),
+-                                ),
+-                              ),
+-                              SizedBox(
+-                                height: 10,
+-                              ),
+-                              Text(
+-                                'Tags',
+-                                style: TextStyle(
+-                                  fontFamily: ConduitFontFamily.robotoLight,
+-                                ),
+-                              ),
+-                              SizedBox(
+-                                height: 10,
+-                              ),
+-                              ConduitEditText(
+-                                controller: tagsCtr,
+-                                hint: "Tags",
+-                                maxLines: 2,
+-                                minLines: 1,
+-                                textInputType: TextInputType.text,
+-                                inputFormatters: [
+-                                  FilteringTextInputFormatter.deny(" "),
+-                                  FilteringTextInputFormatter.allow(
+-                                    RegExp("[0-9a-z]"),
+-                                  ),
+-                                ],
+-                                onEditingComplete: () {
+-                                  final text = tagsCtr!.text.trim();
+-                                  if (text.isNotEmpty) {
+-                                    addTag(text);
+-                                    tagsCtr!.clear();
+-                                    print(tags);
+-                                  }
+-                                },
+-                                validator: (value) {
+-                                  if (value!.isEmpty && tags.isEmpty) {
+-                                    return "Write at least one tag";
+-                                  }
+-                                  return null;
+-                                },
+-                                suffixIcon: InkWell(
+-                                  onTap: () {
+-                                    setState(() {
+-                                      isVisible = !isVisible;
+-                                    });
+-                                  },
+-                                  child: Transform.scale(
+-                                    scale: 0.9,
+-                                    child: isVisible
+-                                        ? Icon(
+-                                            Icons.close,
+-                                            color: AppColors.pholder_background,
+-                                          )
+-                                        : Icon(
+-                                            Icons.info_outline,
+-                                            color: AppColors.pholder_background,
+-                                          ),
+-                                  ),
+-                                ),
+-                              ),
+-                              SizedBox(
+-                                height: 20,
+-                              ),
+-                              Wrap(
+-                                children: tags.map((tag) {
+-                                  return Padding(
+-                                    padding: const EdgeInsets.all(4.0),
+-                                    child: Chip(
+-                                      label: Text(tag),
+-                                      onDeleted: () {
+-                                        setState(() {
+-                                          tags.remove(tag);
+-                                        });
+-                                      },
+-                                    ),
++        ],
++        //---------------------------------
++      ),
++      body: SafeArea(
++        child: Padding(
++          padding: const EdgeInsets.all(12),
++          child: Form(
++            key: _form,
++            child: Column(
++              children: [
++                TextFormField(
++                  controller: titleCtr,
++                  decoration: const InputDecoration(labelText: 'Title'),
++                  validator: (value) => value!.isEmpty ? 'Enter a title' : null,
++                ),
++                const SizedBox(height: 10),
++                TextFormField(
++                  controller: aboutTitleCtr,
++                  decoration: const InputDecoration(labelText: 'Description'),
++                  validator: (value) =>
++                      value!.isEmpty ? 'Enter a description' : null,
++                ),
++                const SizedBox(height: 10),
++                Expanded(
++                  child: Column(
++                    crossAxisAlignment: CrossAxisAlignment.start,
++                    children: [
++                      // Raw-Markdown feld für den Artikelinhalt
++                      //--3/4--------------------------------
++                      TextFormField(
++                        key: const Key('markdownTextField'),
++                        controller: articleCtr,
++                        maxLines: 8,
++                        decoration: const InputDecoration(
++                          labelText: 'Markdown Editor',
++                          border: OutlineInputBorder(),
++                        ),
++                      ),
++                      //----------------------------------
++                      const SizedBox(height: 12),
++                      const Text(
++                        "Preview:",
++                        style: TextStyle(fontWeight: FontWeight.bold),
++                      ),
++                      const SizedBox(height: 6),
++
++                      // Live Markdown Vorschau
++                      //--4/4-------------------------------------
++                      // Anzeige-Widget (MarkdownBody), das den Inhalt aus dem Textfeld articleCtr live umwandelt und rendert.
++                      // Änderungen am Textfeld werden über den ValueListenableBuilder automatisch erkannt und die Vorschau wird direkt aktualisiert.
++                      // Zusätzlich werden Bilder korrekt gerendert, mit Fallback-Anzeige bei Ladefehlern.
++                      Expanded(
++                        child: ValueListenableBuilder<TextEditingValue>(
++                          valueListenable:
++                              articleCtr, // Lauscht auf Änderungen im Markdown-Eingabefeld
++                          builder: (context, value, _) {
++                            return SingleChildScrollView(
++                              // Ermöglicht Scrollen, falls Vorschau länger ist
++
++                              child: MarkdownBody(
++                                data: value.text, // Markdown live rendering
++                                imageBuilder: (uri, title, alt) {
++                                  return Image.network(
++                                    uri.toString(), // Zeigt eingebettete Bilder aus dem Markdown an
++                                    fit: BoxFit.contain,
++                                    height: 200,
++                                    errorBuilder: (ctx, error, stack) => const Text(
++                                        "[Image failed to load]"), // Fehlermeldung, falls Bild nicht geladen werden kann
+                                   );
+-                                }).toList(),
+-                              ),
+-                              SizedBox(
+-                                width: MediaQuery.of(context).size.width,
+-                                child: CupertinoButton(
+-                                  color: AppColors.primaryColor,
+-                                  disabledColor: AppColors.text_color,
+-                                  borderRadius: BorderRadius.circular(10),
+-                                  onPressed: () {
+-                                    FocusManager.instance.primaryFocus!
+-                                        .unfocus();
+-                                    if (_form.currentState!.validate()) {
+-                                      print(tags);
+-                                      if (widget.isUpdateArticle) {
+-                                        setState(() {
+-                                          isEdited = true;
+-                                        });
+-                                        articleBloc.add(
+-                                          UpdateArticleEvent(
+-                                              articleModel: ArticleModel(
+-                                                article: Article(
+-                                                  title: titleCtr!.text.trim(),
+-                                                  description: aboutTitleCtr!
+-                                                      .text
+-                                                      .trim(),
+-                                                  body: articleCtr!.text.trim(),
+-                                                  tagList: tags,
+-                                                ),
+-                                              ),
+-                                              slug:
+-                                                  articleModel!.article!.slug!),
+-                                        );
+-                                      } else {
+-                                        articleBloc.add(
+-                                          SubmitArticleEvent(
+-                                            articleModel: ArticleModel(
+-                                              article: Article(
+-                                                title: titleCtr!.text.trim(),
+-                                                description:
+-                                                    aboutTitleCtr!.text.trim(),
+-                                                body: articleCtr!.text.trim(),
+-                                                tagList: tags,
+-                                              ),
+-                                            ),
+-                                          ),
+-                                        );
+-                                      }
+-                                    }
+-                                  },
+-                                  child: Text(
+-                                    widget.isUpdateArticle
+-                                        ? "Update"
+-                                        : 'Publish Article',
+-                                    style: TextStyle(
+-                                      color: AppColors.white,
+-                                      fontWeight: FontWeight.bold,
+-                                      fontFamily:
+-                                          ConduitFontFamily.robotoRegular,
+-                                    ),
+-                                  ),
+-                                ),
+-                              ),
+-                              SizedBox(
+-                                height: 20,
++                                },
+                               ),
+-                            ],
+-                          ),
++                            );
++                          },
+                         ),
+-                      );
+-                    },
+-                  )),
++                      ),
++                      //---------------------------------------
++                    ],
++                  ),
++                ),
++                if (isUploading) const CircularProgressIndicator(),
++                const SizedBox(height: 10),
++                SizedBox(
++                  width: double.infinity,
++                  child: CupertinoButton(
++                    color: AppColors.primaryColor,
++                    child: Text(widget.isUpdateArticle ? 'Update' : 'Publish'),
++                    onPressed: submit,
++                  ),
+                 ),
+-              ),
++              ],
+             ),
+           ),
+         ),
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/ui/global/global_item_detail_screen.dart M4_abgabe/repo/apps/flutter/lib/ui/global/global_item_detail_screen.dart
+--- a/apps/flutter/lib/ui/global/global_item_detail_screen.dart	2025-06-16 17:32:09.000000000 +0200
++++ b/apps/flutter/lib/ui/global/global_item_detail_screen.dart	2025-07-04 17:53:31.000000000 +0200
+@@ -24,6 +24,7 @@
+ import 'package:flutter/cupertino.dart';
+ import 'package:flutter/material.dart';
+ import 'package:flutter_bloc/flutter_bloc.dart';
++import 'package:flutter_markdown/flutter_markdown.dart';
+ import 'package:flutter_svg/svg.dart';
+ import 'package:hive_flutter/adapters.dart';
+ import 'package:intl/intl.dart';
+@@ -670,16 +671,30 @@
+                                         top: 10,
+                                         bottom: 10,
+                                       ),
+-                                      child: Text(
+-                                        "${state.articleModel.last.article?.body?.replaceAll('\\n', '\n\n')}",
+-                                        style: TextStyle(
+-                                          fontSize: 16.0,
+-                                          wordSpacing: 1,
+-                                          fontFamily:
+-                                              ConduitFontFamily.robotoLight,
++                                        child: SingleChildScrollView(
++
++                                          // Die MarkdownBody-Komponente wird verwendet, um den Artikeltext formatiert darzustellen
++                                            child: MarkdownBody(
++                                              
++                                              // Der Artikeltext wird aus dem geladenen Artikelmodell übernommen
++                                              data: state.articleModel.last.article?.body ?? '',
++                                              
++                                              // Der imageBuilder ermöglicht die Anzeige von Bildern, die im Artikeltext referenziert sind
++                                              imageBuilder: (uri, title, alt) {
++                                                
++                                                // Die Bilder werden aus der angegebenen URL geladen und mit einer festen Höhe angezeigt
++                                                return Image.network(
++                                                  uri.toString(),
++                                                  fit: BoxFit.contain,
++                                                  height: 200,
++                                                  
++                                                  // Falls das Bild nicht geladen werden kann, wird ein Standardhinweis angezeigt
++                                                  errorBuilder: (ctx, error, stack) => const Text("[Image failed to load]"),
++                                                );
++                                              },
++                                            ),
++                                          ),
+                                         ),
+-                                      ),
+-                                    ),
+                                     SizedBox(
+                                       height: 10,
+                                     ),
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/ui/global/markdown_preview.dart M4_abgabe/repo/apps/flutter/lib/ui/global/markdown_preview.dart
+--- a/apps/flutter/lib/ui/global/markdown_preview.dart	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/flutter/lib/ui/global/markdown_preview.dart	2025-07-04 17:53:31.000000000 +0200
+@@ -0,0 +1,96 @@
++// Die Datei markdown_preview.dart enthält ein wiederverwendbares Widget, das einen Markdown-Editor mit Live-Vorschau kombiniert.
++// Während der Benutzer Markdown-Syntax eingibt, wird der formatierte Text darunter direkt gerendert angezeigt.
++import 'package:flutter/material.dart';
++import 'package:flutter_markdown/flutter_markdown.dart';
++
++// Markdown-Vorschau-Komponente
++//---------------------------------------
++// Dieses Widget kombiniert ein Markdown-Eingabefeld mit einer Live-Vorschau.
++// Sobald der Benutzer Text mit Markdown-Syntax eingibt, wird darunter die
++// formatierte Vorschau direkt aktualisiert angezeigt.
++class MarkdownPreview extends StatefulWidget {
++  final TextEditingController
++      controller; // Der Controller verwaltet den eingegebenen Text
++
++  const MarkdownPreview({Key? key, required this.controller}) : super(key: key);
++
++  @override
++  State<MarkdownPreview> createState() => _MarkdownPreviewState();
++}
++//---------------------------------------
++
++class _MarkdownPreviewState extends State<MarkdownPreview> {
++  late String
++      currentMarkdown; // Speichert den aktuellen Markdown-Text zur Vorschau
++
++  @override
++  void initState() {
++    super.initState();
++    currentMarkdown = widget.controller.text; // Initialer Text wird übernommen
++    widget.controller.addListener(() {
++      if (mounted) {
++        setState(() {
++          currentMarkdown = widget
++              .controller.text; // Aktualisiert die Vorschau bei Änderungen
++        });
++      }
++    });
++  }
++
++  @override
++  Widget build(BuildContext context) {
++    return Column(
++      children: [
++        //--------------------------------------------------
++        // Markdown Editor-Eingabefeld
++        Expanded(
++          child: Padding(
++            padding: const EdgeInsets.all(8.0),
++            child: TextField(
++              controller: widget
++                  .controller, // Verknüpft das Eingabefeld mit dem Controller
++              maxLines: null, // Keine feste Zeilenbegrenzung
++              expands: true, // Das Eingabefeld füllt den verfügbaren Platz aus
++              decoration: const InputDecoration(
++                border: OutlineInputBorder(), // Rahmen um das Textfeld
++                labelText: 'Markdown Editor', // Beschriftung des Eingabefelds
++                hintText:
++                    'Write your article in Markdown...', // Platzhaltertext als Hinweis
++              ),
++            ),
++          ),
++        ),
++        //----------------------------------------------------
++
++        const Divider(), // Optische Trennung zwischen Editor und Vorschau
++        const Text(
++          'Preview:', // Überschrift für die Vorschau
++          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
++        ),
++        const SizedBox(height: 8), // Kleiner Abstand vor der Vorschau
++
++        //--------------------------------------------------
++        // Live gerenderte Markdown-Vorschau
++        Expanded(
++          child: Padding(
++            padding: const EdgeInsets.all(8.0),
++            child: MarkdownBody(
++              data:
++                  currentMarkdown, // Der aktuelle Markdown-Text wird gerendert
++              selectable:
++                  true, // Benutzer kann den gerenderten Text markieren/kopieren
++              onTapLink: (text, href, title) {
++                if (href != null) {
++                  ScaffoldMessenger.of(context).showSnackBar(
++                    SnackBar(content: Text('Tapped on link: $href')),
++                  ); // Zeigt eine Snackbar an, wenn auf einen Link geklickt wird
++                }
++              },
++            ),
++          ),
++        ),
++        //----------------------------------------------------
++      ],
++    );
++  }
++}
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/ui/profile/profile_screen.dart M4_abgabe/repo/apps/flutter/lib/ui/profile/profile_screen.dart
+--- a/apps/flutter/lib/ui/profile/profile_screen.dart	2025-06-16 17:32:09.000000000 +0200
++++ b/apps/flutter/lib/ui/profile/profile_screen.dart	2025-07-04 17:53:31.000000000 +0200
+@@ -14,10 +14,24 @@
+ import 'package:flutter/services.dart';
+ import 'package:flutter_bloc/flutter_bloc.dart';
+ import 'package:flutter_svg/svg.dart';
++import 'dart:io';
++import 'package:image_picker/image_picker.dart';
++import 'package:http/http.dart' as http;
++import 'package:path/path.dart' as p;
++import 'package:flutter/foundation.dart';
++import 'package:conduit/config/hive_store.dart';
++
++
+ 
+ class ProfileScreen extends StatefulWidget {
+   static const profileUrl = '/profile';
+-  const ProfileScreen({Key? key}) : super(key: key);
++  
++  // Das ImagePicker-Objekt wird im Konstruktor übergeben, damit es im Test austauschbar ist
++  final ImagePicker imagePicker;
++
++  ProfileScreen({Key? key, ImagePicker? picker})
++      : imagePicker = picker ?? ImagePicker(), // Wenn kein Picker übergeben wird, wird ein neuer ImagePicker erstellt
++        super(key: key);
+ 
+   @override
+   State<ProfileScreen> createState() => _ProfileScreenState();
+@@ -26,12 +40,17 @@
+ class _ProfileScreenState extends State<ProfileScreen> {
+   GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+   String? email, username, bio, image;
+-  TextEditingController? emailCtr, usernameCtr, bioCtr, imageCtr;
++  TextEditingController? emailCtr, usernameCtr, bioCtr;
+   TextEditingController passwordCtr = TextEditingController();
+   late ProfileBloc profileBloc;
+   bool isLoading = false;
+   bool isNoInternet = false;
+   bool isEdited = false;
++
++  XFile? selectedImage; // Dieses Feld speichert das ausgewählte Bild als XFile-Objekt (aus dem ImagePicker)
++
++  
++
+   @override
+   void initState() {
+     profileBloc = context.read<ProfileBloc>();
+@@ -44,10 +63,91 @@
+     emailCtr = TextEditingController(text: email);
+     usernameCtr = TextEditingController(text: username);
+     bioCtr = TextEditingController(text: bio);
+-    imageCtr = TextEditingController(text: image);
+     image;
+   }
+ 
++
++  // Diese Methode öffnet die Bildauswahl, damit der Benutzer ein Bild auswählen kann
++  Future<void> pickImage() async {
++    
++    // Hier wird die Bildauswahl des Geräts geöffnet, damit der Benutzer ein Bild aus seiner Galerie auswählen kann
++    final pickedFile = await widget.imagePicker.pickImage(source: ImageSource.gallery);
++
++
++    // Wenn der Benutzer ein Bild ausgewählt hat, wird es im State gespeichert, um sie später hochladen zu können
++    if (pickedFile != null) {
++      setState(() {
++        selectedImage = pickedFile;
++      });
++    }
++  }
++
++  // Diese Methode lädt das ausgewählte Profilbild auf den Server hoch
++  Future<void> uploadProfileImage(String token) async {
++  
++    // Wenn kein Bild ausgewählt wurde, wird die Methode sofort beendet
++    if (selectedImage == null) return;
++  
++    // Die API-URL zum Hochladen des Bildes wird definiert
++    final uri = Uri.parse('http://localhost:8081/api/profiles/image');
++
++    try {
++          
++        // Das Bild wird als Byte-Array gelesen, um es später hochzuladen
++        final bytes = await selectedImage!.readAsBytes(); 
++      
++
++
++        // Hier wird die HTTP POST-Anfrage vorbereitet, bei der das ausgewählte Bild zusammen mit dem Authentifizierungstoken als Formular an den Server gesendet wird
++        
++        //-------------------------------------------------------
++        
++        // Das Authentifizierungstoken wird mitgeschickt
++        final request = http.MultipartRequest('POST', uri)
++          ..headers['Authorization'] = 'Bearer $token'
++          ..files.add(
++          
++          
++            http.MultipartFile.fromBytes(
++              'file',
++              bytes, // Das Bild wird im Anfrage-Body mitgeschickt
++              filename: selectedImage!.name,
++            ),
++          );
++
++        //-------------------------------------------------------
++
++        // Die Anfrage wird gesendet
++        final streamedResponse = await request.send();
++
++        // Die Antwort wird verarbeitet
++        final response = await http.Response.fromStream(streamedResponse);
++
++        // Wenn der Upload erfolgreich war
++        if (response.statusCode == 200) {
++          final imageUrl = RegExp(r'"imageUrl"\s*:\s*"([^"]+)"')
++              .firstMatch(response.body)
++              ?.group(1); // wird die Bild-URL aus der Server-Antwort extrahiert
++          if (imageUrl != null) {
++            setState(() {
++              image= imageUrl; // und ins Eingabefeld geschrieben
++            });
++          }
++        } 
++      
++        // Wenn der Upload fehlschlägt, wird der Fehler angezeigt
++        else {
++          print("Web upload failed: ${response.statusCode}");
++        }
++    
++    
++
++    }
++    catch (e) {
++      print("Upload error: $e");
++    }
++}
++
+   @override
+   Widget build(BuildContext context) {
+     return GestureDetector(
+@@ -146,40 +246,62 @@
+                                   borderRadius: BorderRadius.circular(50),
+                                   border: Border.all(
+                                       color: AppColors.primaryColor, width: 1)),
+-                              child: Padding(
+-                                padding: const EdgeInsets.all(1.0),
+-                                child: image != null
+-                                    ? ClipRRect(
+-                                        borderRadius: BorderRadius.circular(50),
+-                                        child: Image.network(image!,
+-                                            alignment: Alignment.center),
+-                                      )
+-                                    : ClipRRect(
+-                                        borderRadius: BorderRadius.circular(50),
+-                                        child: Center(
+-                                          child: Icon(
+-                                            Icons.person,
+-                                            size: 45,
+-                                            color: AppColors.text_color,
+-                                          ),
+-                                        ),
+-                                      ),
+-                              ),
++                                
++                                // Hier wird das Profilbild in einen runden Rahmen eingefügt
++                                child: ClipRRect(
++                                  borderRadius: BorderRadius.circular(50),
++                                  
++                                  child: selectedImage != null // Hier wird geprüft, ob der Benutzer bereits ein neues Bild ausgewählt hat
++                                      
++                                      // Wenn ja, wird es abhängig von der Plattform angezeigt: Auf dem Web wird das Bild über den Netzwerkpfad geladen, während es auf mobilen Geräten direkt aus dem lokalen Dateisystem geladen wird
++                                      ? (kIsWeb
++                                          ? Image.network(selectedImage!.path, fit: BoxFit.cover)
++                                          : Image.file(File(selectedImage!.path), fit: BoxFit.cover))
++                                      
++                                      : image != null // wenn der Benutzer noch kein neues Bild ausgewählt hat, wird geprüft, ob bereits ein Profilbild vom Server vorhanden ist
++
++                                          // Das hochgeladene Profilbild wird mit einem Zeitstempel in der URL angezeigt, um das Browser-Caching zu umgehen
++                                          ? Image.network('$image?timestamp=${DateTime.now().millisecondsSinceEpoch}', fit: BoxFit.cover)
++                                          
++                                          // Wenn weder ein neues Bild ausgewählt wurde noch ein altes Bild vorhanden ist, wird ein Platzhalter-Icon für das Profilbild angezeigt
++                                          : Center(
++                                              child: Icon(
++                                                Icons.person,
++                                                size: 45,
++                                                color: AppColors.text_color,
++                                              ),
++                                            ),
++                                ),
++
++
++
+                             ),
++
++                          // Wenn der Benutzer ein neues Bild ausgewählt hat, wird hier der Pfad des ausgewählten Bildes unter dem Profilbild angezeigt
++                          if (selectedImage != null)
++                            Padding(
++                              padding: const EdgeInsets.only(top: 8.0),
++                              child: Text(
++                                kIsWeb ? selectedImage!.name : p.basename(selectedImage!.path), // Je nach Plattform wird der Dateiname des ausgewählten Bildes angezeigt
++                                key: Key('selectedImagePath'), // Ein eindeutiger Schlüssel für Test
++                                style: TextStyle(fontSize: 12, color: Colors.grey), // Der Pfad wird in kleiner, grauer Schrift angezeigt
++                                ),
++                              ),
+                             SizedBox(
+                               height: 20,
+                             ),
+-                            ConduitEditText(
+-                              controller: imageCtr,
+-                              maxLines: 1,
+-                              minLines: 1,
+-                              prefixIcon: Icon(
+-                                Icons.link,
+-                                color: AppColors.primaryColor,
+-                              ),
+-                              textInputType: TextInputType.url,
+-                              hint: "Profile photo url",
+-                            ),
++
++
++                          // Ein Button, mit dem der Benutzer ein neues Bild aus der Bildauswahl auswählen kann
++                          ElevatedButton(
++                            onPressed: pickImage, // Wenn der Button gedrückt wird, wird die Bildauswahl geöffnet
++                            key: Key('uploadImageButton'), // Key für Test
++                            child: Text("Bild auswählen"), // Text im Button
++                          ),   
++                          
++                                                   
++
++                            
+                             SizedBox(
+                               height: 20,
+                             ),
+@@ -259,18 +381,30 @@
+                               width: MediaQuery.of(context).size.width,
+                               height: 45,
+                               child: MaterialButton(
++                                key: Key('saveButton'), // Key für Test, um den Button zu können
+                                 color: AppColors.primaryColor,
+                                 textColor: AppColors.white,
+                                 shape: RoundedRectangleBorder(
+                                   borderRadius: BorderRadius.circular(10),
+                                 ),
+-                                onPressed: () {
++                                onPressed: () async  {
+                                   if (_formKey.currentState!.validate()) {
+                                     FocusManager.instance.primaryFocus!
+                                         .unfocus();
+                                     setState(() {
+                                       isEdited = true;
+                                     });
++
++                                  // Holt die gespeicherten Benutzerdaten (inklusive Authentifizierungs-Token) aus Hive
++                                  final userData = await hiveStore.isExistUserAccessData();
++                                  
++                                  // Aus den Benutzerdaten wird das Token des zuletzt gespeicherten Nutzers ausgelesen
++                                  // Dieses Token wird benötigt, um den Bild-Upload am Server zu authentifizieren
++                                  final token = userData?.values.last.token ?? '';
++                                  
++                                  // Führt den Bild-Upload durch, bevor die Profil-Daten aktualisiert werden
++                                  await uploadProfileImage(token);
++                                    
+                                     profileBloc.add(
+                                       UpdateProfileEvent(
+                                         profileModel: ProfileModel(
+@@ -279,7 +413,7 @@
+                                                   usernameCtr!.text.toString(),
+                                               email: emailCtr!.text.toString(),
+                                               bio: bioCtr!.text.toString(),
+-                                              image: imageCtr!.text.toString()),
++                                              image: image ?? ''),
+                                         ),
+                                       ),
+                                     );
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/widget/all_article_widget.dart M4_abgabe/repo/apps/flutter/lib/widget/all_article_widget.dart
+--- a/apps/flutter/lib/widget/all_article_widget.dart	2025-06-16 17:32:09.000000000 +0200
++++ b/apps/flutter/lib/widget/all_article_widget.dart	2025-07-04 17:53:31.000000000 +0200
+@@ -12,6 +12,7 @@
+ import 'package:conduit/widget/shimmer_widget.dart';
+ import 'package:flutter/material.dart';
+ import 'package:flutter_bloc/flutter_bloc.dart';
++import 'package:flutter_markdown/flutter_markdown.dart';
+ import 'package:intl/intl.dart';
+ 
+ class AllAirtistWidget extends StatefulWidget {
+@@ -328,17 +329,35 @@
+                 ),
+               ),
+             ),
++            
++            // In diesem Bereich wird der Artikeltext als Markdown angezeigt, um eine formatierte Darstellung zu ermöglichen
+             Padding(
+               padding: const EdgeInsets.only(top: 5, left: 10, right: 10),
+               child: Container(
+-                child: Text(
+-                  "${widget.articlesModel?.body}",
+-                  maxLines: 3,
+-                  style: TextStyle(
+-                    overflow: TextOverflow.ellipsis,
+-                    fontSize: 11,
+-                    color: AppColors.text_color,
+-                    fontFamily: ConduitFontFamily.robotoLight,
++                
++                // Die maximale Höhe des Markdown-Bereichs wird begrenzt, damit die Karten in der Übersicht nicht zu groß werden
++                constraints: BoxConstraints(
++                  maxHeight: 100,
++                ),
++                child: SingleChildScrollView(
++                  
++                  // Die MarkdownBody-Komponente rendert den Artikelinhalt mit Markdown-Formatierung
++                  child: MarkdownBody(
++                    data: widget.articlesModel?.body ?? '',
++                    
++                    // Der imageBuilder ermöglicht es, Bilder innerhalb des Artikels korrekt darzustellen
++                    imageBuilder: (uri, title, alt) {
++                      
++                      // Bilder werden aus dem Netzwerk geladen und mit einer festen Höhe dargestellt
++                      return Image.network(
++                        uri.toString(),
++                        fit: BoxFit.contain,
++                        height: 200,
++
++                        // Falls ein Bild nicht geladen werden kann, wird text angezeigt
++                        errorBuilder: (ctx, error, stack) => const Text("[Image failed to load]"),
++                      );
++                    },
+                   ),
+                 ),
+               ),
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/pubspec.yaml M4_abgabe/repo/apps/flutter/pubspec.yaml
+--- a/apps/flutter/pubspec.yaml	2025-06-16 17:32:09.000000000 +0200
++++ b/apps/flutter/pubspec.yaml	2025-07-04 17:53:31.000000000 +0200
+@@ -58,7 +58,12 @@
+   showcaseview: ^2.0.3
+   lottie: ^2.6.0
+ 
+-  # image_picker: ^1.0.4
++  # Profil-Bild test
++  image_picker: ^1.0.4 # Wird verwendet, um Bilder vom Gerät auszuwählen
++  mocktail: ^1.0.0 # Wird für das Erstellen von Mock-Objekten und das Testen von Blocs verwendet
++  file_picker: ^8.0.0+1 # Wird verwendet, um beliebige Dateien (Bilder) vom Gerät auszuwählen
++  flutter_markdown: ^0.6.20 # Wird verwendet, um Markdown-Text in Flutter-Widgets als gerendertes HTML darzustellen
++
+ 
+ dev_dependencies:
+   integration_test:
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/test/add_article_screen_test.dart M4_abgabe/repo/apps/flutter/test/add_article_screen_test.dart
+--- a/apps/flutter/test/add_article_screen_test.dart	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/flutter/test/add_article_screen_test.dart	2025-07-04 17:53:31.000000000 +0200
+@@ -0,0 +1,156 @@
++/// Dieser Widget-Test überprüft die grundlegende Markdown-Logik im Artikel-Erstellen-Screen.
++/// Dabei wird simuliert, dass nach einem Bild-Upload der passende Markdown-Text (```![Image](URL)```)
++/// korrekt in das Eingabefeld eingefügt wird.
++///
++/// Wichtige Punkte:
++///    Der eigentliche Bild-Upload wird nicht getestet, stattdessen wird das erwartete Markdown manuell ins Feld geschrieben.
++///    Es werden Mock-Objekte für den ArticleBloc, den FilePicker und Hive verwendet, um die Abhängigkeiten zu umgehen.
++///    Anschließend wird geprüft, ob das Markdown-Eingabefeld den erwarteten Text mit Bild-Link enthält.
++///
++/// Ziel: Sicherstellen, dass das Markdown-Editorfeld korrekt auf Änderungen reagiert
++/// und das typische Markdown für Bilder übernommen wird.
++
++// Widget-Test für die Markdown-Bildintegration im Editor
++// ---------------------------------------------------------------
++// Dieser Test überprüft, ob das Markdown-Eingabefeld im AddArticleScreen
++// nach dem manuellen Einfügen von Bild-Markdown den korrekten Text enthält.
++//
++// Dabei werden FilePicker, HiveStore und ArticleBloc gemockt,
++// um die Abhängigkeiten und den echten Upload-Prozess zu simulieren.
++// ---------------------------------------------------------------
++
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:flutter_bloc/flutter_bloc.dart';
++import 'package:mocktail/mocktail.dart';
++import 'package:conduit/bloc/article_bloc/article_bloc.dart';
++import 'package:conduit/bloc/article_bloc/article_event.dart';
++import 'package:conduit/bloc/article_bloc/article_state.dart';
++import 'package:conduit/ui/add_article/add_article_screen.dart';
++import 'package:conduit/config/hive_store.dart';
++import 'package:conduit/model/user_model.dart';
++import 'package:hive/hive.dart';
++import 'package:file_picker/file_picker.dart';
++import 'dart:typed_data';
++
++//---Mocks und Platzhalter erzeugen-----------------------------------
++
++// Dummy-Version des ArticleBloc für Tests ohne echte Logik
++class DummyArticleBloc extends Mock implements ArticleBloc {}
++
++// Fake-Event und Fake-State als Fallback-Werte für Mocktail
++class FakeArticleEvent extends Fake implements ArticleEvent {}
++
++class FakeArticleState extends Fake implements ArticleState {}
++
++// Überschriebene FilePicker-Klasse, die immer eine Dummy-Bilddatei zurückliefert
++class _MockFilePicker extends FilePicker {
++  @override
++  Future<FilePickerResult?> pickFiles({
++    bool allowCompression = true,
++    bool allowMultiple = false,
++    List<String>? allowedExtensions,
++    int? compressionQuality,
++    String? dialogTitle,
++    String? initialDirectory,
++    bool lockParentWindow = false,
++    FileType type = FileType.any,
++    bool withData = false,
++    bool withReadStream = false,
++    bool readSequential = false,
++    Function(FilePickerStatus)? onFileLoading,
++  }) async {
++    return FilePickerResult([
++      PlatformFile(
++        name: 'test.jpg', // Simulierter Dateiname
++        size: 1024, // Dateigröße in Bytes
++        bytes: Uint8List.fromList([0, 1, 2, 3]), // Dummy-Bildinhalt
++      )
++    ]);
++  }
++}
++
++// Mock-Klassen für Hive-Store, Benutzerdaten und Box
++class MockHiveStore extends Mock implements HiveStore {}
++
++class MockUserAccessData extends Mock implements UserAccessData {}
++
++class MockBox<T> extends Mock implements Box<T> {}
++
++//--------------------------------------------------------------------
++
++void main() {
++  late DummyArticleBloc dummyBloc; // Platzhalter für den Bloc
++
++  // Setup für globale Mocktail-Registrierung
++  setUpAll(() {
++    registerFallbackValue(FakeArticleEvent());
++    registerFallbackValue(FakeArticleState());
++  });
++
++  // Setup vor jedem Test
++  setUp(() {
++    dummyBloc = DummyArticleBloc(); // Neuen Mock-Bloc erstellen
++
++    // Standardverhalten für Bloc-Stream und State festlegen
++    when(() => dummyBloc.stream)
++        .thenAnswer((_) => const Stream<ArticleState>.empty());
++    when(() => dummyBloc.state).thenReturn(FakeArticleState());
++
++    // Überschreibt den FilePicker mit dem Dummy
++    FilePicker.platform = _MockFilePicker();
++
++    // HiveStore und Benutzerdaten simulieren
++    final mockHiveStore = MockHiveStore();
++    hiveStore = mockHiveStore;
++
++    final mockUserAccessData = MockUserAccessData();
++    when(() => mockUserAccessData.token).thenReturn("dummyToken");
++
++    final mockBox = MockBox<UserAccessData>();
++    when(() => mockBox.values).thenReturn([mockUserAccessData]);
++
++    when(() => mockHiveStore.isExistUserAccessData())
++        .thenAnswer((_) async => mockBox);
++  });
++
++  // Hilfsfunktion: Baut das zu testende Widget im MaterialApp-Wrapper
++  Widget createTestWidget() {
++    return MaterialApp(
++      home: BlocProvider<ArticleBloc>.value(
++        value: dummyBloc,
++        child: AddArticleScreen(
++          isUpdateArticle: true, // Test läuft im Artikel-Update-Modus
++          slug: "test-slug",
++        ),
++      ),
++    );
++  }
++
++  //---Eigentlicher Testfall------------------------------------------
++  testWidgets(
++      'easy passing test: editor updates with markdown after manual insert',
++      (WidgetTester tester) async {
++    // Screen wird aufgebaut
++    await tester.pumpWidget(createTestWidget());
++    await tester.pumpAndSettle(); // Auf vollständigen UI-Aufbau warten
++
++    // Das Markdown-Eingabefeld finden über Key
++    final markdownField = find.byKey(const Key('markdownTextField'));
++    final textField = tester.widget<TextFormField>(markdownField);
++
++    // Simuliert das manuelle Einfügen des erwarteten Bild-Markdown-Texts
++    textField.controller?.text +=
++        '\n\n![Image](http://localhost:8081/uploads/test.jpg "Uploaded")\n\n';
++
++    await tester.pumpAndSettle(); // UI erneut rendern lassen
++
++    // Überprüfen, ob das Markdown-Feld den korrekten Bild-Link enthält
++    expect(textField.controller?.text.contains('![Image]('), isTrue);
++    expect(
++        textField.controller?.text
++            .contains('http://localhost:8081/uploads/test.jpg'),
++        isTrue);
++  });
++  //-----------------------------------------------------------------
++}
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/test/photo-test.dart M4_abgabe/repo/apps/flutter/test/photo-test.dart
+--- a/apps/flutter/test/photo-test.dart	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/flutter/test/photo-test.dart	2025-07-04 17:53:31.000000000 +0200
+@@ -0,0 +1,100 @@
++// In diesem Test wird geprüft, ob das Auswählen eines Bildes und Upload korrekt funktioniert
++
++
++import 'package:flutter/material.dart';
++import 'package:flutter_test/flutter_test.dart';
++import 'package:conduit/ui/profile/profile_screen.dart';
++import 'package:flutter_bloc/flutter_bloc.dart';
++import 'package:conduit/bloc/profile_bloc/profile_bloc.dart';
++import 'package:conduit/bloc/profile_bloc/profile_state.dart';
++import 'package:conduit/bloc/profile_bloc/profile_event.dart';
++import 'package:mocktail/mocktail.dart';
++import 'package:image_picker/image_picker.dart';
++
++// Hier wird ein Dummy-Bloc erstellt, um das Verhalten des echten ProfileBlocs zu simulieren
++class DummyProfileBloc extends Mock implements ProfileBloc {}
++
++// Dummy-Event für den Fallback
++class FakeProfileEvent extends Fake implements ProfileEvent {}
++
++// Dummy-State für den Fallback
++class FakeProfileState extends Fake implements ProfileState {}
++
++// Hier wird ein Mock für den ImagePicker erstellt
++class MockImagePicker extends Mock implements ImagePicker {}
++
++void main() {
++  late DummyProfileBloc dummyBloc; // Hier wird die Dummy-Bloc-Variable deklariert
++  late MockImagePicker mockImagePicker; // Hier wird die Mock-ImagePicker-Variable deklariert
++
++  // Vor allen Tests werden die Fallback-Werte registriert
++  setUpAll(() {
++    registerFallbackValue(FakeProfileEvent()); // Fallback für Events
++    registerFallbackValue(FakeProfileState()); // Fallback für States
++    registerFallbackValue(ImageSource.gallery); // Fallback für den ImageSource-Enum
++  });
++
++  // Vor jedem Test wird der Dummy-Bloc und der MockImagePicker neu initialisiert
++  setUp(() {
++    dummyBloc = DummyProfileBloc(); // Der Dummy-Bloc wird erstellt
++    when(() => dummyBloc.stream).thenAnswer((_) => const Stream<ProfileState>.empty()); // Das Bloc-Stream-Verhalten wird simuliert
++    when(() => dummyBloc.state).thenReturn(FakeProfileState()); // Der Initial-State wird festgelegt
++
++    mockImagePicker = MockImagePicker(); // Der Mock-ImagePicker wird erstellt
++
++    // Es wird simuliert, dass beim Öffnen des ImagePickers immer ein Dummy-Bild ausgewählt wird
++    when(() => mockImagePicker.pickImage(source: any(named: 'source')))
++        .thenAnswer((_) async => XFile('assets/images/test.jpg'));
++  });
++
++  // Diese Methode erstellt das Widget für den Test
++  Widget createTestWidget() {
++    return MaterialApp(
++      home: BlocProvider<ProfileBloc>.value(
++        value: dummyBloc, // Der Dummy-Bloc wird im Widget verwendet
++        child: ProfileScreen(picker: mockImagePicker), // Der MockImagePicker wird im ProfileScreen genutzt
++      ),
++    );
++  }
++
++  // In diesem ersten Test wird geprüft, ob der lokale Bildpfad korrekt angezeigt wird, wenn ein Bild ausgewählt wird
++  testWidgets('should show local image path after selecting image', (WidgetTester tester) async {
++    
++    await tester.pumpWidget(createTestWidget()); // Das Test-Widget wird geladen
++    await tester.pumpAndSettle(); // Alle Animations- und Build-Prozesse werden abgeschlossen
++
++
++    final uploadButton = find.byKey(const Key('uploadImageButton')); // Der Upload-Button wird gesucht
++    expect(uploadButton, findsOneWidget); // Es wird geprüft, ob der Button existiert
++
++
++    await tester.tap(uploadButton); // Der Button wird gedrückt, um den ImagePicker zu öffnen
++    await tester.pumpAndSettle(); // Warten, bis das Bild ausgewählt wurde und das Widget aktualisiert ist
++
++
++    final imagePathText = find.byKey(const Key('selectedImagePath')); // Das Textfeld mit dem Bildpfad wird gesucht
++    expect(imagePathText, findsOneWidget); // Es wird geprüft, ob der Bildpfad im UI angezeigt wird
++  });
++
++  // In diesem zweiten Test wird geprüft, ob der Upload korrekt ausgelöst wird, wenn der Benutzer den Save-Button drückt
++  testWidgets('should trigger image upload when save button is pressed', (WidgetTester tester) async {
++    
++    await tester.pumpWidget(createTestWidget()); // Das Test-Widget wird geladen
++    await tester.pumpAndSettle(); // Alle Animations- und Build-Prozesse werden abgeschlossen
++
++
++    final uploadButton = find.byKey(const Key('uploadImageButton')); // Der Upload-Button wird gesucht
++    expect(uploadButton, findsOneWidget); // Es wird geprüft, ob der Button existiert
++
++
++    await tester.tap(uploadButton); // Der Button wird gedrückt, um den ImagePicker zu öffnen
++    await tester.pumpAndSettle(); // Warten, bis das Bild ausgewählt wurde und das Widget aktualisiert ist
++
++
++    final saveButton = find.byKey(const Key('saveButton')); // Der Save-Button wird gesucht
++    expect(saveButton, findsOneWidget); // Es wird geprüft, ob der Button existiert
++
++    await tester.tap(saveButton); // Der Save-Button wird gedrückt, um das Speichern auszulösen
++    await tester.pumpAndSettle(); // Alle Animations- und Build-Prozesse werden abgeschlossen
++  });
++}
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/components.d.ts M4_abgabe/repo/apps/vue3/components.d.ts
+--- a/apps/vue3/components.d.ts	2025-06-16 17:32:09.000000000 +0200
++++ b/apps/vue3/components.d.ts	2025-07-04 17:53:31.000000000 +0200
+@@ -17,6 +17,7 @@
+     ErrorMessages: typeof import('./src/components/ErrorMessages.vue')['default']
+     FavoriteButton: typeof import('./src/components/FavoriteButton.vue')['default']
+     FollowButton: typeof import('./src/components/FollowButton.vue')['default']
++    MarkdownRenderer: typeof import('./src/components/MarkdownRenderer.vue')['default']
+     RouterLink: typeof import('vue-router')['RouterLink']
+     RouterView: typeof import('vue-router')['RouterView']
+     TagList: typeof import('./src/components/TagList.vue')['default']
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/cypress/e2e/edit_markdown_article.cy.ts M4_abgabe/repo/apps/vue3/cypress/e2e/edit_markdown_article.cy.ts
+--- a/apps/vue3/cypress/e2e/edit_markdown_article.cy.ts	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/vue3/cypress/e2e/edit_markdown_article.cy.ts	2025-07-04 17:53:31.000000000 +0200
+@@ -0,0 +1,74 @@
++// End-to-End Test: Artikelbearbeitung mit Live Markdown-Vorschau & Bild-Upload
++//
++// Idee & Ablauf:
++// - Login als Testnutzer mit gültigen Zugangsdaten
++// - Vorhandenen Artikel im Editor öffnen
++// - Markdown-Inhalt eingeben und prüfen, ob die Live-Vorschau korrekt gerendert wird
++// - Bild-Upload simulieren, API-Abfrage abfangen und erfolgreichen Upload sicherstellen
++// - Prüfen, ob das Bild automatisch im Markdown-Text eingebunden wird
++// - Kontrollieren, ob das hochgeladene Bild in der Live-Vorschau angezeigt wird
++
++
++describe('Edit Markdown Article - Live Preview & Image Upload', () => {
++
++  // Testdaten für Login und bestehenden Artikel
++  const testEmail = 'isaac.nicolas@example.com';
++  const testPassword = 'lewis';
++  const articleSlug = 'einblicke-in-programmiersprache-2FQVKvPbJ0yQU_tZW_F2NQ'; // Vorhandener Artikel
++  const testImagePath = 'cypress/test_assets/sample.jpg'; // Testbild im Projektverzeichnis
++
++  it('renders live preview and uploads image during article edit', () => {
++
++    // ---------- LOGIN ----------
++    cy.visit('/login', { 
++      // Umgehen von möglichen Caching-Effekten beim fetch
++      onBeforeLoad(win) { (win as any).fetch = undefined; } 
++    });
++    
++    // Login mit gültigen Testdaten
++    cy.get('input[placeholder="Email"]').type(testEmail);
++    cy.get('input[placeholder="Password"]').type(testPassword);
++    cy.get('button[type="submit"]').click();
++    
++    // Sicherstellen, dass wir eingeloggt sind
++    cy.url().should('not.include', '/login');
++
++    // ---------- ARTIKEL BEARBEITEN ----------
++    cy.visit(`/article/editor/${articleSlug}`);
++
++    // Beispiel-Markdown in das Textfeld schreiben
++    const markdownText = '# Test Title\n**bold text**\n- item1\n- item2';
++    cy.get('textarea[name="body"]').clear().type(markdownText);
++
++    // Vorschau prüfen: Überschrift, Fettdruck, Liste
++    cy.contains('Live Preview').parent().within(() => {
++      cy.contains('Test Title');
++      cy.contains('bold text');
++      cy.get('li').should('have.length', 2); // Zwei Listenelemente
++    });
++
++    // ---------- BILD-UPLOAD SIMULIEREN ----------
++
++    // API-Abfrage zum Bild-Upload abfangen
++    cy.intercept('POST', `/api/articles/${articleSlug}/images`).as('uploadImage');
++
++    // Testbild auswählen und Upload triggern
++    cy.get('input[type="file"]').selectFile(testImagePath, { force: true });
++
++    // Sicherstellen, dass der Upload erfolgreich war
++    cy.wait('@uploadImage').its('response.statusCode').should('eq', 200);
++
++    // Prüfen, ob der Markdown-Text automatisch das Bild enthält
++    cy.get('textarea[name="body"]')
++      .invoke('val')
++      .should('contain', '![alt text](')
++      .and('contain', '/uploads/');
++
++    // Vorschau prüfen: Das hochgeladene Bild wird angezeigt
++    cy.contains('Live Preview').parent().within(() => {
++      cy.get('img')
++        .should('have.attr', 'src')
++        .and('include', '/uploads/');
++    });
++  });
++});
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/cypress/e2e/end2end.cy.ts M4_abgabe/repo/apps/vue3/cypress/e2e/end2end.cy.ts
+--- a/apps/vue3/cypress/e2e/end2end.cy.ts	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/vue3/cypress/e2e/end2end.cy.ts	2025-07-04 17:53:31.000000000 +0200
+@@ -0,0 +1,56 @@
++// Dieser Test prüft, ob ein Benutzer ein Profilbild auswählen, lokal anzeigen und anschließend erfolgreich hochladen kann
++
++describe('E2E Tests: Profilbild hochladen', () => {
++
++  // Hier werden die Testdaten für E-Mail, Passwort und das Testbild definiert
++  const testEmail = 'testuser@example.com';
++  const testPassword = 'Start1234!';
++  const testImagePath = 'testImages/testbild.jpg'; // Ein Dummy-Testbild im cypress/fixtures Verzeichnis
++
++  // Dieser Test prüft die vollständige Bild-Upload-Funktion inklusive Vorschau und Server-Upload
++  it('zeigt die lokale Vorschau des Profilbildes und lädt das Bild erst bei Klick hoch', () => {
++
++    // Zuerst wird die Login-Seite geöffnet
++    cy.visit('/login');
++
++    // Dann werden die Login-Felder mit der E-Mail und dem Passwort ausgefüllt
++    cy.get('input[placeholder="Email"]').type(testEmail);
++    cy.get('input[placeholder="Password"]').type(testPassword);
++
++    // Der Login-Button wird geklickt
++    cy.get('button[type="submit"]').click();
++
++    // Es wird überprüft, ob die Startseite nach dem Login erfolgreich geladen wurde
++    cy.url().should('include', '/');
++
++    // Danach wird die Einstellungsseite aufgerufen
++    cy.visit('/settings');
++
++    // Anschließend wird ein Bild im Dateiupload-Feld ausgewählt
++    cy.get('input[type="file"]').selectFile(`cypress/fixtures/${testImagePath}`, { force: true });
++
++    // Es wird geprüft, ob der Dateiname des ausgewählten Bildes korrekt angezeigt wird
++    cy.contains('testbild.jpg').should('be.visible');
++
++    // Außerdem wird kontrolliert, ob das ausgewählte Bild direkt in der Vorschau sichtbar ist
++    cy.get('img.img-preview').should('be.visible');
++
++    // Hier wird der API-Request zum Bild-Upload überwacht
++    cy.intercept('POST', 'http://localhost:8081/api/profiles/image').as('uploadRequest');
++
++    // Der Button zum Speichern der Einstellungen wird angeklickt
++    cy.get('button').contains('Update Settings').click();
++
++    // Nach dem Speichern wird geprüft, ob das Bild in der Vorschau weiterhin korrekt angezeigt wird
++    cy.get('img.img-preview')
++      .should('have.attr', 'src')
++      .and('include', '/uploads/'); // Die Bildquelle muss aus dem Upload-Verzeichnis stammen
++
++    // Es wird geprüft, ob der Bild-Upload-Request erfolgreich mit Status 200 abgeschlossen wurde
++    cy.wait('@uploadRequest').its('response.statusCode').should('eq', 200);
++
++    // Am Ende wird überprüft, ob der Benutzer korrekt auf sein Profil weitergeleitet wurde
++    cy.url().should('include', '/profile/');
++  });
++
++});
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/cypress/support/commands.ts M4_abgabe/repo/apps/vue3/cypress/support/commands.ts
+--- a/apps/vue3/cypress/support/commands.ts	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/vue3/cypress/support/commands.ts	2025-07-04 17:53:31.000000000 +0200
+@@ -0,0 +1,37 @@
++/// <reference types="cypress" />
++// ***********************************************
++// This example commands.ts shows you how to
++// create various custom commands and overwrite
++// existing commands.
++//
++// For more comprehensive examples of custom
++// commands please read more here:
++// https://on.cypress.io/custom-commands
++// ***********************************************
++//
++//
++// -- This is a parent command --
++// Cypress.Commands.add('login', (email, password) => { ... })
++//
++//
++// -- This is a child command --
++// Cypress.Commands.add('drag', { prevSubject: 'element'}, (subject, options) => { ... })
++//
++//
++// -- This is a dual command --
++// Cypress.Commands.add('dismiss', { prevSubject: 'optional'}, (subject, options) => { ... })
++//
++//
++// -- This will overwrite an existing command --
++// Cypress.Commands.overwrite('visit', (originalFn, url, options) => { ... })
++//
++// declare global {
++//   namespace Cypress {
++//     interface Chainable {
++//       login(email: string, password: string): Chainable<void>
++//       drag(subject: string, options?: Partial<TypeOptions>): Chainable<Element>
++//       dismiss(subject: string, options?: Partial<TypeOptions>): Chainable<Element>
++//       visit(originalFn: CommandOriginalFn, url: string, options: Partial<VisitOptions>): Chainable<Element>
++//     }
++//   }
++// }
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/cypress/support/e2e.ts M4_abgabe/repo/apps/vue3/cypress/support/e2e.ts
+--- a/apps/vue3/cypress/support/e2e.ts	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/vue3/cypress/support/e2e.ts	2025-07-04 17:53:31.000000000 +0200
+@@ -0,0 +1,22 @@
++// cypress/support/e2e.ts
++
++// ***********************************************************
++// This example support/e2e.ts is processed and
++// loaded automatically before your test files.
++//
++// This is a great place to put global configuration and
++// behavior that modifies Cypress.
++//
++// You can change the location of this file or turn off
++// automatically serving support files with the
++// 'supportFile' configuration option.
++//
++// You can read more here:
++// https://on.cypress.io/configuration
++// ***********************************************************
++
++// Import commands.js using ES2015 syntax:
++import './commands'
++
++// Alternatively you can use CommonJS syntax:
++// require('./commands')
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/cypress.config.ts M4_abgabe/repo/apps/vue3/cypress.config.ts
+--- a/apps/vue3/cypress.config.ts	2025-06-16 17:32:09.000000000 +0200
++++ b/apps/vue3/cypress.config.ts	2025-07-04 17:53:31.000000000 +0200
+@@ -1,11 +1,12 @@
+-import { defineConfig } from "cypress";
++import { defineConfig } from 'cypress'
+ 
++// Cypress Konfigurationsdatei für End-to-End Tests
+ export default defineConfig({
+   e2e: {
++    // Basis-URL für alle Tests, z. B. cy.visit('/login') wird zu http://localhost:5173/login
+     baseUrl: 'http://localhost:5173',
+-    specPattern: '**/*.cy.ts',
+-    setupNodeEvents(on, config) {
+-      // implement node event listeners here
+-    },
++
++    // Legt das Support-File fest, in dem globale Befehle oder Hooks definiert werden
++    supportFile: 'cypress/support/e2e.ts',
+   },
+-});
++})
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/package.json M4_abgabe/repo/apps/vue3/package.json
+--- a/apps/vue3/package.json	2025-06-16 17:32:09.000000000 +0200
++++ b/apps/vue3/package.json	2025-07-04 17:53:31.000000000 +0200
+@@ -14,6 +14,15 @@
+   "dependencies": {
+     "@vueuse/core": "^10.2.1",
+     "axios": "^1.4.0",
++    "markdown-it": "^14.1.0",
++    "markdown-it-abbr": "^2.0.0",
++    "markdown-it-anchor": "^9.2.0",
++    "markdown-it-footnote": "^4.0.0",
++    "markdown-it-highlightjs": "^4.2.0",
++    "markdown-it-sub": "^2.0.0",
++    "markdown-it-sup": "^2.0.0",
++    "markdown-it-task-lists": "^2.1.1",
++    "markdown-it-toc-done-right": "^4.2.0",
+     "pinia": "^2.1.6",
+     "vue": "^3.3.4",
+     "vue-router": "^4.2.4"
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/src/components/MarkdownRenderer.vue M4_abgabe/repo/apps/vue3/src/components/MarkdownRenderer.vue
+--- a/apps/vue3/src/components/MarkdownRenderer.vue	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/vue3/src/components/MarkdownRenderer.vue	2025-07-04 17:53:31.000000000 +0200
+@@ -0,0 +1,51 @@
++/**
++ * Komponente zum Rendern von Markdown-Text mit Erweiterungen
++ * 
++ * Idee & Ablauf:
++ * - Nimmt über das Prop 'source' den reinen Markdown-Text entgegen
++ * - Initialisiert Markdown-It mit Plugins für:
++ *   - Abkürzungen, Fußnoten, Anker-Links, ToDo-Listen, Inhaltsverzeichnis
++ *   - Hoch-/Tiefstellung & Syntax-Highlighting von Code
++ * - Wandelt den Markdown-Text in HTML um (v-html Ausgabe, bewusst verwendet)
++ * - Ermöglicht Vorschau von formatiertem Text, Listen, Tabellen, Code-Blöcken etc.
++ */
++
++
++<template>
++  <!-- Gerendertes HTML wird hier eingefügt (Achtung: v-html ist "unsicher", aber gewollt für Markdown) -->
++  <div v-html="renderedMarkdown" />
++</template>
++
++<script setup lang="ts">
++import { computed } from 'vue'
++import MarkdownIt from 'markdown-it'
++
++//  Erweiterungen für MarkdownIt hinzufügen (erlauben spezielle Features)
++import MarkdownItAbbr from 'markdown-it-abbr'            // Abkürzungen
++import MarkdownItAnchor from 'markdown-it-anchor'        // Anker-Links für Überschriften
++import MarkdownItFootnote from 'markdown-it-footnote'    // Fußnoten
++import MarkdownItHighlightjs from 'markdown-it-highlightjs' // Syntax-Highlighting für Code
++import MarkdownItSub from 'markdown-it-sub'              // Tiefgestellte Zeichen (z. B. H₂O)
++import MarkdownItSup from 'markdown-it-sup'              // Hochgestellte Zeichen (z. B. x²)
++import MarkdownItTasklists from 'markdown-it-task-lists' // ToDo-Listen im Markdown
++import MarkdownItTOC from 'markdown-it-toc-done-right'   // Inhaltsverzeichnis automatisch generieren
++
++// Prop 'source' enthält den Markdown-Text, den die Komponente rendert
++const props = defineProps<{ source: string }>()
++
++// Initialisierung des Markdown-It-Parsers mit Plugins
++const md = new MarkdownIt()
++  .use(MarkdownItAbbr)
++  .use(MarkdownItAnchor)
++  .use(MarkdownItFootnote)
++  .use(MarkdownItHighlightjs)
++  .use(MarkdownItSub)
++  .use(MarkdownItSup)
++  .use(MarkdownItTasklists)
++  .use(MarkdownItTOC)
++
++//  Berechnetes Property für das fertige HTML aus dem Markdown-Text
++const renderedMarkdown = computed(() => {
++  return md.render(props.source)
++})
++</script>
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/src/pages/article/[[id]].vue M4_abgabe/repo/apps/vue3/src/pages/article/[[id]].vue
+--- a/apps/vue3/src/pages/article/[[id]].vue	2025-06-16 17:32:09.000000000 +0200
++++ b/apps/vue3/src/pages/article/[[id]].vue	2025-07-04 17:53:31.000000000 +0200
+@@ -5,6 +5,7 @@
+ import { formatDate } from '@/utils'
+ import type { Article } from '@/types'
+ import { useUserStore } from '@/stores/useUserStore'
++import MarkdownRenderer from '@/components/MarkdownRenderer.vue' // Markdown korrekt rendern inkl. Bilder
+ 
+ const route = useRoute() as RouteLocationNormalizedLoaded
+ const store = useUserStore()
+@@ -19,7 +20,7 @@
+   createdAt: '',
+   slug: '',
+   description: '',
+-  body: '',
++  body: '',   
+   tagList: [],
+   updatedAt: '',
+   favorited: false,
+@@ -30,7 +31,6 @@
+ })
+ async function getActive() {
+   const res = await api.getArticle(route.params.id as string)
+-
+   article.value = res.article
+ }
+ 
+@@ -53,7 +53,7 @@
+         <h1>{{ article.title }}</h1>
+         <div class="article-meta">
+           <router-link to="">
+-            <img :src="article.author.image">
++            <img :src="article.author.image" />
+           </router-link>
+           <div class="info">
+             <router-link to="" class="author">
+@@ -84,17 +84,18 @@
+       <div class="row article-content">
+         <div class="col-xs-12">
+           <p>{{ article.description }}</p>
+-          <p v-html="article.body" />
++          <!--  Markdown korrekt anzeigen, inkl. Bilder -->
++          <MarkdownRenderer :source="article.body" />
+           <tag-list :options="article.tagList" />
+         </div>
+       </div>
+ 
+-      <hr>
++      <hr />
+ 
+       <div class="article-actions">
+         <div class="article-meta">
+           <router-link to="">
+-            <img :src="article.author.image">
++            <img :src="article.author.image" />
+           </router-link>
+           <div class="info">
+             <router-link to="" class="author">
+@@ -124,13 +125,9 @@
+       <div v-if="!store.isLoggedIn" class="row">
+         <div class="col-xs-12 col-md-8 offset-md-2">
+           <p>
+-            <router-link to="/login">
+-              Sign in
+-            </router-link>
++            <router-link to="/login">Sign in</router-link>
+             &nbsp; or &nbsp;
+-            <router-link to="/register">
+-              Sign up
+-            </router-link>
++            <router-link to="/register">Sign up</router-link>
+             &nbsp; to add comments on this article.
+           </p>
+         </div>
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/src/pages/article/components/ArticleForm.vue M4_abgabe/repo/apps/vue3/src/pages/article/components/ArticleForm.vue
+--- a/apps/vue3/src/pages/article/components/ArticleForm.vue	2025-06-16 17:32:09.000000000 +0200
++++ b/apps/vue3/src/pages/article/components/ArticleForm.vue	2025-07-04 17:53:31.000000000 +0200
+@@ -1,19 +1,25 @@
+ <script lang="ts" setup>
+ import { useAsyncState } from '@vueuse/core'
+ import type { RouteLocationNormalizedLoaded } from 'vue-router'
+-import api from '@/api'
++import api from '@/api' 
++import MarkdownRenderer from '@/components/MarkdownRenderer.vue' // Vorschau-Komponente für Markdown
++import { useUserStore } from '@/stores/useUserStore'
+ 
+-const errors = ref({})
+-const router = useRouter()
+-const tagList = ref<string[]>([])
++const errors = ref({})            
++const router = useRouter()          
++const tagList = ref<string[]>([])   
+ const route = useRoute() as RouteLocationNormalizedLoaded
+-const isArticleCreate = route.name === 'ArticleCreate'
++const isArticleCreate = route.name === 'ArticleCreate' 
++const store = useUserStore()        // Aktuelle User-Daten, insbesondere Token
+ const formStore = ref({
+   title: '',
+   description: '',
+   body: '',
+   tagList: '',
+ })
++
++//Liste der Bild-URLs, die zum Artikel gehören
++const uploadedImages = ref<string[]>([])
+ async function getArticle() {
+   const { article } = await api.getArticle(route.params.id as string)
+ 
+@@ -21,6 +27,41 @@
+   formStore.value.body = article.body
+   formStore.value.description = article.description
+   formStore.value.title = article.title
++
++  uploadedImages.value = (article as any).imageUrls ?? [] // Bild-URLs vom Server übernehmen
++}
++
++// --------------------  BILD HOCHLADEN UND MARKDOWN ERGÄNZEN ------------------------
++async function uploadImage(event: Event) {
++  const files = (event.target as HTMLInputElement).files
++  if (!files || files.length === 0) return
++
++  const formData = new FormData()
++  formData.append('file', files[0])  // Muss exakt zum Backend passen
++
++  const slug = route.params.id
++  const response = await fetch(`/api/articles/${slug}/images`, {
++    method: 'POST',
++    body: formData,
++    headers: {
++      Authorization: `Token ${store.userInfo?.token}`, // Authentifizierung mit Token
++    },
++  })
++
++  const json = await response.json()
++  const imageUrl = json.uploaded // Backend liefert Bild-URL unter "uploaded"
++
++  if (response.ok && imageUrl) {
++    uploadedImages.value.push(imageUrl) // URL zur Vorschau hinzufügen
++    formStore.value.body += `\n\n![alt text](${imageUrl} "Image")\n\n` // Direkt ins Markdown einfügen
++  } else {
++    console.error('Image upload failed or missing imageUrl in response.', json)
++  }
++}
++// Kopiert fertigen Markdown-Link in Zwischenablage
++function copyMarkdown(url: string) {
++  navigator.clipboard.writeText(`![alt text](${url} "Title")`)
++  // ------------------------------------------------------------------------------------------------------------------------
+ }
+ function createArticle() {
+   return api.createArticle({
+@@ -34,9 +75,7 @@
+   })
+ }
+ function onEnter() {
+-  if (!formStore.value.tagList || tagList.value.includes(formStore.value.tagList))
+-    return
+-
++  if (!formStore.value.tagList || tagList.value.includes(formStore.value.tagList)) return
+   tagList.value.push(formStore.value.tagList)
+   formStore.value.tagList = ''
+ }
+@@ -47,18 +86,15 @@
+         router.push(`/article/${article.slug}`)
+       })
+       .catch((error) => {
+-        errors.value = error.errors || {}
++        errors.value = error.errors || {} 
+       })
+   },
+   null,
+-  {
+-    immediate: false,
+-  },
++  { immediate: false },
+ )
+ 
+ onMounted(() => {
+-  if (!isArticleCreate)
+-    getArticle()
++  if (!isArticleCreate) getArticle()
+ })
+ </script>
+ 
+@@ -72,37 +108,102 @@
+             <fieldset>
+               <fieldset class="form-group">
+                 <input
+-                  v-model="formStore.title" required type="text" name="title" placeholder="Article Title"
++                  v-model="formStore.title"
++                  required
++                  type="text"
++                  name="title"
++                  placeholder="Article Title"
+                   class="form-control form-control-lg"
+                 >
+               </fieldset>
+               <fieldset class="form-group">
+                 <input
+-                  v-model="formStore.description" required type="text" name="description" class="form-control"
++                  v-model="formStore.description"
++                  required
++                  type="text"
++                  name="description"
++                  class="form-control"
+                   placeholder="What's this article about?"
+                 >
+               </fieldset>
+               <fieldset class="form-group">
++                <label>Write your article (Markdown supported)</label>
+                 <textarea
+-                  v-model="formStore.body" rows="8" required name="body" class="form-control"
++                  v-model="formStore.body"
++                  rows="8"
++                  required
++                  name="body"
++                  class="form-control"
+                   placeholder="Write your article (in markdown)"
+                 />
+               </fieldset>
++
++              <!--  Live-Vorschau des Markdown-Texts -->
++              <fieldset class="form-group">
++                <label>Live Preview</label>
++                <div class="border rounded p-3" style="background-color: #f9f9f9;">
++                  <MarkdownRenderer :source="formStore.body" />
++                </div>
++              </fieldset>
++
++              <!--  Bild-Upload-Feld -->
+               <fieldset class="form-group">
++                <label>Upload image for this article</label>
+                 <input
+-                  v-model="formStore.tagList" type="text" name="tagList" class="form-control"
+-                  placeholder="Enter tags" @keydown.enter.prevent="onEnter"
++                  type="file"
++                  accept="image/*"
++                  @change="uploadImage"
++                  class="form-control"
++                />
++              </fieldset>
++
++              <!--  Liste der hochgeladenen Bilder mit Copy-Button -->
++              <div v-if="uploadedImages.length > 0" class="form-group">
++                <label>Available image URLs:</label>
++                <ul>
++                  <li
++                    v-for="url in uploadedImages"
++                    :key="url"
++                    style="margin-bottom: 0.5rem"
++                  >
++                    <code>{{ `![alt text](${url} "Title")` }}</code>
++                    <button
++                      class="btn btn-sm btn-outline-secondary"
++                      @click="() => copyMarkdown(url)"
++                    >
++                      Copy Markdown
++                    </button>
++                  </li>
++                </ul>
++              </div>
++              <fieldset class="form-group">
++                <input
++                  v-model="formStore.tagList"
++                  type="text"
++                  name="tagList"
++                  class="form-control"
++                  placeholder="Enter tags"
++                  @keydown.enter.prevent="onEnter"
+                 >
+                 <div class="tag-list">
+-                  <span v-for="(tag, index) in tagList" :key="tag" class="tag-default tag-pill">
++                  <span
++                    v-for="(tag, index) in tagList"
++                    :key="tag"
++                    class="tag-default tag-pill"
++                  >
+                     <i class="ion-close-round" @click="tagList.splice(index, 1)" />
+                     {{ tag }}
+                   </span>
+                 </div>
+               </fieldset>
+-              <button type="submit" :disabled="isLoading" class="btn btn-lg pull-xs-right btn-primary">
++              <button
++                type="submit"
++                :disabled="isLoading"
++                class="btn btn-lg pull-xs-right btn-primary"
++              >
+                 Publish Article
+               </button>
++
+             </fieldset>
+           </form>
+         </div>
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/src/pages/settings/index.vue M4_abgabe/repo/apps/vue3/src/pages/settings/index.vue
+--- a/apps/vue3/src/pages/settings/index.vue	2025-06-16 17:32:09.000000000 +0200
++++ b/apps/vue3/src/pages/settings/index.vue	2025-07-04 17:53:31.000000000 +0200
+@@ -23,8 +23,53 @@
+   oldPassword: '',
+ })
+ 
++// Eine neue Variable, die die ausgewählte Datei speichert
++const selectedFile = ref<File | null>(null)
++
++
++// Diese Methode wird aufgerufen, wenn der Benutzer eine Datei auswählt
++// Die ausgewählte Datei wird gespeichert und eine lokale Vorschau wird im Profilbild-Feld angezeigt
++function onFileChange(event: Event) {
++  
++  // Das Ziel des Events (also das Dateiupload-Inputfeld) wird aus dem Event herausgelesen
++  const target = event.target as HTMLInputElement
++
++  // Es wird geprüft, ob überhaupt Dateien im Inputfeld vorhanden sind und ob mindestens eine Datei ausgewählt wurde
++  if (target.files && target.files.length > 0) {
++    selectedFile.value = target.files[0]   // Die ausgewählte Datei wird in der Variable selectedFile gespeichert, um sie später hochladen zu können
++    
++    // Zusätzlich wird im Profil-Formular direkt eine lokale Vorschau des Bildes angezeigt
++    // Dazu wird eine temporäre URL für die ausgewählte Datei erstellt und im Profilbild-Feld gesetzt
++    fromStoreUser.value.image = URL.createObjectURL(selectedFile.value)
++  }
++}
++
++
+ const { isLoading, execute: onSubmit } = useAsyncState(
+   async () => {
++
++    // Vor dem Senden der Formulardaten wird geprüft, ob der Benutzer ein neues Profilbild ausgewählt hat
++    if (selectedFile.value) {
++      const formData = new FormData() // Ein neues FormData-Objekt wird erstellt, um die Datei zu versenden
++      formData.append('file', selectedFile.value) // Die ausgewählte Datei wird angehängt
++      
++      // Die Datei wird per POST-Anfrage an den Server gesendet
++      await fetch('http://localhost:8081/api/profiles/image', {
++        method: 'POST',
++        headers: {
++          Authorization: `Bearer ${store.userInfo?.token}`, // Das Authentifizierungstoken wird mitgesendet
++        },
++        body: formData, // und die Datei wird im Body der Anfrage mitgeschickt
++      })
++        .then(async (res) => {
++          const data = await res.json() // Die Antwort vom Server wird verarbeitet
++          fromStoreUser.value.image = data.imageUrl // und die vom Server zurückgegebene Bild-URL wird im Benutzerprofil gespeichert
++        })
++        .catch((err) => {
++          console.error('Bild-Upload fehlgeschlagen', err) // Falls ein Fehler auftritt, wird dieser in der Konsole ausgegeben
++        })
++    }
++
+     return await api.updateUser({ user: fromStoreUser.value }).then(({ user }) => {
+       store.userInfo = user
+       router.push(`/profile/${user.username}`)
+@@ -69,8 +114,27 @@
+           </h1>
+           <form autocomplete="on" @submit.prevent="() => onSubmit()">
+             <fieldset>
++
+               <fieldset class="form-group">
+-                <input v-model="fromStoreUser.image" type="text" class="form-control" placeholder="URL of profile picture" id="img">
++
++                <!-- Neues Dateiupload-Feld, um ein Profilbild auszuwählen -->
++                <label for="file">Profilbild auswählen:</label>
++                <input type="file" id="file" accept="image/*" @change="onFileChange" class="form-control" />
++              </fieldset>
++              
++              <fieldset class="form-group">
++
++                <!-- Anzeige des Dateinamens der aktuell ausgewählten Datei -->
++                <label v-if="selectedFile">Ausgewählte Datei: {{ selectedFile.name }}</label>
++              </fieldset>
++
++
++              <fieldset class="form-group">
++
++                <!-- Vorschau des Profilbildes, das der Benutzer ausgewählt hat -->
++                <img v-if="fromStoreUser.image" :src="fromStoreUser.image" class="img-preview" style="max-width: 100px; border-radius: 5px;" />
++
++                
+               </fieldset>
+               <fieldset class="form-group">
+                 <input

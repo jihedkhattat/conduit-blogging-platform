@@ -1,0 +1,35 @@
+# .NET
+**/bin/
+**/obj/
+*.user
+.vs/
+TestResults/
+
+# Runtime uploads (keep the folder)
+apps/dotnet/src/Api/wwwroot/uploads/*
+!apps/dotnet/src/Api/wwwroot/uploads/.gitkeep
+
+# Node / Vue
+node_modules/
+dist/
+apps/vue3/cypress/videos/
+apps/vue3/cypress/screenshots/
+apps/vue3/cypress/downloads/
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+apps/flutter/build/
+
+# Python
+__pycache__/
+tools/data-generator/test_tokens.txt
+
+# IDEs / OS
+.idea/
+*.iml
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+Thumbs.db

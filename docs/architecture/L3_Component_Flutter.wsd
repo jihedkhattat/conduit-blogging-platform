@@ -1,0 +1,39 @@
+@startuml
+!include <C4/C4_Component>
+
+Container_Boundary(flutterApp, "Flutter Frontend") {
+  
+  Component(main, "main.dart", "App Entry Point", "Startpunkt der Flutter-App, initialisiert Routing und Theme")
+  Component(ui, "UI", "Screens", "Alle Seitenansichten der App")
+  Component(widget, "Widgets", "Wiederverwendbare UI-Komponenten")
+  Component(bloc, "BLoC", "State Management", "Verwaltet UI-Status und Logik")
+  Component(model, "Modelle", "Datendefinition", "Datenmodelle wie User, Artikel etc.")
+  Component(services, "Services", "API-Zugriffe", "Kommunikation mit dem Backend über HTTP")
+  Component(repository, "Repository", "Datenzugriffslogik", "Fasst Services zusammen für BLoCs")
+  Component(navigator, "Navigator", "Routing", "Seitenwechsel-Logik")
+  Component(utils, "Utils", "Hilfsmethoden", "Hilfsfunktionen für Formatierung, Validierung etc.")
+  Component(config, "Config", "Konfiguration", "App-Einstellungen, Farben, Themes etc.")
+}
+
+Rel(main, config, "nutzt")
+Rel(main, navigator, "initialisiert Routing")
+Rel(main, ui, "startet Screens")
+Rel(ui, bloc, "kommuniziert mit")
+Rel(bloc, repository, "fragt Daten ab")
+Rel(repository, services, "nutzt HTTP-Zugriff")
+Rel(services, model, "serialisiert Daten")
+Rel(ui, widget, "verwendet wiederverwendbare Widgets")
+Rel(ui, utils, "nutzt Hilfsfunktionen")
+Rel(bloc, model, "verwendet Datenmodelle")
+@enduml
+
+
+/' 
+
+Das Diagramm zeigt die innere Struktur der Flutter-App. Die App startet mit main.dart, wo Konfigurationen geladen und die Navigation eingerichtet werden
+Die Benutzeroberfläche besteht aus verschiedenen Screens (UI), die mit wiederverwendbaren Widgets gebaut sind
+Die App-Logik läuft über den BLoC, der Nutzeraktionen verarbeitet und den Zustand der App steuert
+Der BLoC spricht mit dem Repository, das die Daten organisiert und über die Services per HTTP mit dem Backend kommuniziert
+Modelle definieren die Datenstruktur (z. B. Artikel), und Utils enthalten Hilfsfunktionen und einstellungen wie Farben und Themes werden in Config verwaltet
+
+'/

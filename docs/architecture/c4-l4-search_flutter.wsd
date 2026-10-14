@@ -1,0 +1,53 @@
+@startuml 
+title Sequenzdiagramm: Volltextsuche (Flutter → Backend) – Level 4
+
+actor User
+
+participant "Flutter: SearchScreen" as SearchScreen
+participant "AllArticlesImpl.searchArticles(...)" as Repository
+participant "API Endpoint: GET /api/articles/search" as HttpEndpoint
+participant "ArticlesHandler.SearchArticlesAsync(...)" as Handler
+participant "ConduitRepository.GetAllArticlesAsync(...)" as DBRepo
+participant "SQLite DB" as Database
+
+User -> SearchScreen : Gibt Suchbegriff ein + klickt auf Suchsymbol (oder Enter)
+SearchScreen -> Repository : searchArticles(query, offset, limit)
+Repository -> HttpEndpoint : GET /api/articles/search?... + Authorization
+
+alt Erfolgreicher Aufruf (Token gültig)
+HttpEndpoint -> Handler : SearchArticlesAsync(query, limit, offset, user)
+Handler -> DBRepo : GetAllArticlesAsync()
+DBRepo -> Database : SELECT * FROM Articles + Tags + Author
+Database --> DBRepo : Artikelliste
+DBRepo --> Handler : Alle Artikel mit Tags + Author
+Handler --> HttpEndpoint : Gefilterte Artikel (JSON)
+HttpEndpoint --> Repository : HTTP 200 OK + JSON
+Repository --> SearchScreen : Artikel + Trefferanzahl
+SearchScreen -> User : Zeige Artikelvorschau + Paginierung
+else Fehler: Kein Token / Ungültig
+HttpEndpoint --> Repository : HTTP 401 Unauthorized
+Repository --> SearchScreen : Fehler wird geworfen
+SearchScreen -> User : Zeigt Fehlermeldung
+end
+@enduml
+
+
+
+
+
+
+
+
+
+
+/'
+
+Dieses Sequenzdiagramm zeigt den Ablauf der Volltextsuche in der Flutter-App vom Frontend bis zur Datenbank. Zuerst gibt der Benutzer einen Suchbegriff in der SearchScreen-Oberfläche ein und startet die Suche durch einen Klick auf das Suchsymbol(oder Enter)
+Daraufhin wird die Methode searchArticles(...) aus dem Repository AllArticlesImpl aufgerufen. Diese sendet direkt per http.get(...) einen HTTP-GET-Request an den API-Endpunkt /api/articles/search, wobei 
+der im Hive gespeicherte Token im Header mitgesendet wird. Ist der Token gültig, wird der Aufruf an die Methode SearchArticlesAsync(...) im ArticlesHandler weitergeleitet. Diese ruft GetAllArticlesAsync(...) aus 
+dem ConduitRepository auf, um alle Artikel inklusive Tags und Autor aus der Datenbank zu laden. Nach dem Filtern anhand der Suchbegriffe wird die Ergebnisliste in JSON-Format an den Client zurückgegeben
+Das Flutter-UI zeigt anschließend die Artikelvorschau und Paginierung an
+
+Falls jedoch kein gültiger Token vorhanden ist oder die Authentifizierung fehlschlägt, antwortet der Server mit HTTP 401. Dieser Fehler wird in Flutter als Exception erkannt, und dem Nutzer wird eine Fehlermeldung angezeigt
+
+'/

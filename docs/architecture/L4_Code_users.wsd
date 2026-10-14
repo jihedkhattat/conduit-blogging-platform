@@ -1,0 +1,75 @@
+@startuml
+package "Users" {
+
+  interface IUserHandler {
+    +CreateAsync(newUser: NewUserDto, cancellationToken: CancellationToken): Task<UserDto>
+    +UpdateAsync(username: string, updatedUser: UpdatedUserDto, cancellationToken: CancellationToken): Task<UserDto>
+    +LoginAsync(login: LoginUserDto, cancellationToken: CancellationToken): Task<UserDto>
+    +GetAsync(username: string, cancellationToken: CancellationToken): Task<UserDto>
+  }
+
+  class UserHandler {
+    -_repository: IConduitRepository
+    -_tokenGenerator: ITokenGenerator
+    +CreateAsync(...)
+    +UpdateAsync(...)
+    +LoginAsync(...)
+    +GetAsync(...)
+  }
+
+  class UserEnvelope<T> {
+    +User: T
+  }
+
+  class UserModule {
+    +AddRoutes(app: IEndpointRouteBuilder): void
+  }
+
+  class NewUserDto {
+    +Username: string
+    +Email: string
+    +Password: string
+  }
+
+  class UpdatedUserDto {
+    +Username: string
+    +Email: string
+    +Password: string
+    +Bio: string
+    +Image: string
+  }
+
+  class LoginUserDto {
+    +Email: string
+    +Password: string
+  }
+
+  class UserDto {
+    +Username: string
+    +Email: string
+    +Token: string
+    +Bio: string
+    +Image: string
+  }
+
+  IUserHandler <|.. UserHandler
+  UserModule --> IUserHandler : uses
+  UserModule --> UserEnvelope
+  UserHandler --> UserDto
+  UserHandler --> NewUserDto
+  UserHandler --> UpdatedUserDto
+  UserHandler --> LoginUserDto
+}
+@enduml
+
+
+
+/' 
+
+Das Diagramm zeigt die Benutzer-Komponente im Backend.
+UserHandler ist die Hauptklasse, die alle Benutzerfunktionen wie Login, Registrierung oder Profiländerung enthält
+Sie implementiert das Interface IUserHandler, das die Methode festlegt, die von außen verwendet werden kann
+Der UserHandler nutzt verschiedene DTOs (z. B. NewUserDto, LoginUserDto) für die Eingabe und gibt ein UserDto zurück
+Das UserModule verbindet die Routen mit dem UserHandler und verwendet dafür auch die Struktur UserEnvelope, um das User-Objekt als Antwort zurückzugeben
+
+'/

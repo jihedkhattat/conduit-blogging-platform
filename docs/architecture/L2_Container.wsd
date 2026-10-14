@@ -1,0 +1,29 @@
+@startuml
+!include <C4/C4_Container>
+
+Person(user, "Benutzer", "Verfasst Artikel, liest Inhalte und verwaltet sein Profil")
+
+System_Boundary(conduit, "Conduit System") {
+    Container(webApp, "Vue.js Web App", "JavaScript (Vue.js)", "Frontend im Browser zur Nutzung von Conduit")
+    Container(mobileApp, "Flutter Mobile App", "Dart (Flutter)", "Mobiles Frontend für Android/iOS")
+    Container(api, "ASP.NET Core Backend", "C# .NET", "Stellt die REST API für Artikel, Nutzer und Kommentare bereit")
+    ContainerDb(database, "SQLite Datenbank", "SQL", "Speichert Nutzer, Artikel, Kommentare und Tags")
+}
+
+Rel(user, webApp, "Verwendet über den Browser")
+Rel(user, mobileApp, "Verwendet über die mobile App")
+
+Rel(webApp, api, "Kommuniziert mit", "REST API (JSON)")
+Rel(mobileApp, api, "Kommuniziert mit", "REST API (JSON)")
+
+Rel(api, database, "Liest & schreibt", "SQL")
+@enduml
+
+
+
+/' 
+
+Dieses Diagramm zeigt, dass der Benutzer über die Web-App (Vue.js) oder die mobile App (Flutter) mit dem Conduit-System arbeitet, beide Frontends senden Anfragen an das ASP.NET Core 
+Backend, das über eine REST-API kommuniziert. Das Backend speichert alle Daten wie Artikel und Kommentare in einer SQLite-Datenbank
+
+'/

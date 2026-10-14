@@ -1,0 +1,62 @@
+@startuml
+package "Profiles" {
+
+  interface IProfilesHandler {
+    +GetAsync(profileUsername: string, username: string, cancellationToken): Task<ProfileDto>
+    +FollowProfileAsync(profileUsername: string, username: string, cancellationToken): Task<ProfileDto>
+    +UnFollowProfileAsync(profileUsername: string, username: string, cancellationToken): Task<ProfileDto>
+  }
+
+  class ProfilesHandler {
+    -_repository: IConduitRepository
+    +GetAsync(...)
+    +FollowProfileAsync(...)
+    +UnFollowProfileAsync(...)
+  }
+
+  class ProfilesModule {
+    +AddRoutes(app: IEndpointRouteBuilder): void
+  }
+
+  class ProfilesEnvelope<T> {
+    +Profile: T
+  }
+
+  class Profile {
+    +Username: string
+    +Bio: string
+    +Image: string
+    +Following: bool
+  }
+
+
+class ProfileDto {
+  +Username: string
+  +Bio: string
+  +Image: string
+  +Following: bool
+}
+
+
+  IProfilesHandler <|.. ProfilesHandler
+  ProfilesModule --> IProfilesHandler : uses
+  ProfilesModule --> ProfilesEnvelope
+  ProfilesHandler --> ProfileDto
+}
+
+@enduml
+
+
+
+/' 
+
+Das Diagramm zeigt die Profiles-Komponente des Backends, die für das Anzeigen und Verwalten von Benutzerprofilen zuständig ist
+Im Zentrum steht die Klasse ProfilesHandler, die Methoden wie GetAsync, FollowProfileAsync und UnFollowProfileAsync bereitstellt
+Diese Methoden werden im Interface IProfilesHandler definiert, das von ProfilesHandler implementiert wird
+Die Klasse ProfilesModule verbindet die API-Endpunkte wie /api/profiles/{username} mit dem System
+Sie benutzt das Interface IProfilesHandler, um die Logik auszuführen, und das ProfilesEnvelope, um die Profil-Daten als Antwort zurückzugeben
+Das Rückgabeformat basiert auf dem ProfileDto, der vom ProfilesHandler verwendet wird
+er enthält grundlegende Profildaten wie Benutzername, Bild und ob der aktuelle Nutzer diesem Profil folgt
+
+
+'/

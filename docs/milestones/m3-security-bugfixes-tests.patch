@@ -1,0 +1,1695 @@
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/SaltMigration.sql M3_abgabe/repo/apps/dotnet/SaltMigration.sql
+--- a/apps/dotnet/SaltMigration.sql	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/dotnet/SaltMigration.sql	2025-06-13 19:03:09.000000000 +0200
+@@ -0,0 +1,12 @@
++﻿BEGIN TRANSACTION;
++
++-- Fügt für die bestehenden Tabelle "Users" eine neue Spalte "Salt" hinzu,
++-- um den Salt-Wert für sichere Passwortspeicherung zu speichern
++ALTER TABLE "Users" ADD "Salt" TEXT NOT NULL DEFAULT '';
++
++-- Führt diese Migration in der EF-Migrationshistorie
++INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
++VALUES ('20250522142954_AddSaltToUser', '7.0.10');
++
++COMMIT;
++
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Api/Features/Users/IUserHandler.cs M3_abgabe/repo/apps/dotnet/src/Api/Features/Users/IUserHandler.cs
+--- a/apps/dotnet/src/Api/Features/Users/IUserHandler.cs	2025-05-19 15:15:58.000000000 +0200
++++ b/apps/dotnet/src/Api/Features/Users/IUserHandler.cs	2025-06-13 19:03:09.000000000 +0200
+@@ -12,4 +12,8 @@
+     public Task<UserDto> LoginAsync(LoginUserDto login, CancellationToken cancellationToken);
+ 
+     public Task<UserDto> GetAsync(string username, CancellationToken cancellationToken);
++
++    // Diese Methode wird verwendet, um das Passwort eines Benutzers zu ändern, dabei wird das alte Passwort überprüft und ein neues gehashtes Passwort gespeichert
++    public Task<bool> ChangePasswordAsync(string username, ChangePasswordDto dto, CancellationToken cancellationToken);
++
+ }
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Api/Features/Users/UserHandler.cs M3_abgabe/repo/apps/dotnet/src/Api/Features/Users/UserHandler.cs
+--- a/apps/dotnet/src/Api/Features/Users/UserHandler.cs	2025-05-19 15:15:58.000000000 +0200
++++ b/apps/dotnet/src/Api/Features/Users/UserHandler.cs	2025-06-13 19:03:09.000000000 +0200
+@@ -1,3 +1,4 @@
++using Realworlddotnet.Api.Utils;
+ using Realworlddotnet.Core.Dto;
+ using Realworlddotnet.Core.Repositories;
+ 
+@@ -16,7 +17,19 @@
+ 
+     public async Task<UserDto> CreateAsync(NewUserDto newUser, CancellationToken cancellationToken)
+     {
+-        var user = new User(newUser);
++        // Bei Registrierung wird Passwort gehasht und Benutzer wird erstellt
++        //---------------------------------------
++
++        // Bei der Registrierung wird das Passwort nicht mehr im Klartext gespeichert
++        // sondern generieren wir einen Salt und berechnen daraus den Hash
++        var salt = PasswordHasher.GenerateSalt();
++        var hashedPassword = PasswordHasher.HashPassword(newUser.Password, salt);
++
++        var user = new User(newUser, hashedPassword, salt); // Danach wird der Benutzer mit dem gehashten Passwort und dem Salt erstellt
++
++        //---------------------------------------
++
++
+         await _repository.AddUserAsync(user);
+         await _repository.SaveChangesAsync(cancellationToken);
+         var token = _tokenGenerator.CreateToken(user.Username);
+@@ -27,7 +40,10 @@
+         string username, UpdatedUserDto updatedUser, CancellationToken cancellationToken)
+     {
+         var user = await _repository.GetUserByUsernameAsync(username, cancellationToken);
+-        user.UpdateUser(updatedUser);
++        user.Username = updatedUser.Username ?? user.Username;
++        user.Email = updatedUser.Email ?? user.Email;
++        user.Bio = updatedUser.Bio ?? user.Bio;
++        user.Image = updatedUser.Image ?? user.Image;
+         await _repository.SaveChangesAsync(cancellationToken);
+         var token = _tokenGenerator.CreateToken(user.Username);
+         return new UserDto(user.Username, user.Email, token, user.Bio, user.Image);
+@@ -37,11 +53,40 @@
+     {
+         var user = await _repository.GetUserByEmailAsync(login.Email);
+ 
+-        if (user == null || user.Password != login.Password)
++        if (user == null)
+         {
+             throw new ProblemDetailsException(422, "Incorrect Credentials");
+         }
+ 
++        // Login
++        //---------------------------------------
++
++        // Beim Login wird geprüft, ob das Benutzerobjekt noch keinen Salt besitzt,
++        // das heißt, dass das Passwort bisher im Klartext gespeichert ist
++        if (string.IsNullOrWhiteSpace(user.Salt))
++        {
++            // In diesem Fall wird geprüft, ob das eingegebene Passwort exakt mit dem gespeicherten übereinstimm
++            if (user.Password != login.Password)
++                throw new ProblemDetailsException(422, "Incorrect Credentials");
++
++            var newSalt = PasswordHasher.GenerateSalt();  // Wenn das Passwort korrekt ist, wird ein neuer Salt erzeugt
++            var newHash = PasswordHasher.HashPassword(login.Password, newSalt); // danach wird das Passwort mit dem neuen Salt gehasht
++
++            // Abschließend wird der neue Passwort-Hash und der neue Salt im Benutzerobjekt gespeichert
++            user.Password = newHash;
++            user.Salt = newSalt;
++
++            await _repository.SaveChangesAsync(cancellationToken); // und die Änderungen werden dauerhaft in der Datenbank gespeichert
++        }
++        else
++        {
++            // Wenn bereits ein Salt vorhanden ist, wird das eingegebene Passwort mit dem gespeicherten Hash und Salt überprüft
++            if (!PasswordHasher.VerifyPassword(login.Password, user.Password, user.Salt))
++                throw new ProblemDetailsException(422, "Incorrect Credentials");
++        }
++
++        //---------------------------------------
++
+         var token = _tokenGenerator.CreateToken(user.Username);
+         return new UserDto(user.Username, user.Email, token, user.Bio, user.Image);
+     }
+@@ -52,4 +97,40 @@
+         var token = _tokenGenerator.CreateToken(user.Username);
+         return new UserDto(user.Username, user.Email, token, user.Bio, user.Image);
+     }
++
++
++    // Die Methode ChangePasswordAsync wird verwendet, um das Passwort eines Benutzers sicher zu ändern
++    public async Task<bool> ChangePasswordAsync(string username, ChangePasswordDto dto, CancellationToken cancellationToken)
++    {
++        // Zuerst wird der Benutzer mit dem angegebenen Benutzernamen aus der Datenbank geladen
++        var user = await _repository.GetUserByUsernameAsync(username, cancellationToken);
++
++        // dann wird geprüft, ob der Benutzer ein altes Passwort im Klartext gespeichert hat, also ohne Salt
++        if (string.IsNullOrWhiteSpace(user.Salt))
++        {
++            // Falls das eingegebene aktuelle Passwort nicht mit dem gespeicherten übereinstimmt, wird false zurückgegeben
++            if (user.Password != dto.CurrentPassword)
++                return false;
++        }
++        else
++        {
++            // Falls das Passwort bereits gehasht ist, wird die Eingabe mit dem gespeicherten Hash und Salt überprüft
++            if (!PasswordHasher.VerifyPassword(dto.CurrentPassword, user.Password, user.Salt))
++                return false;
++        }
++
++        
++        var newSalt = PasswordHasher.GenerateSalt(); // Danach wird ein neuer Salt generiert, um das neue Passwort abzusichern
++        var newHash = PasswordHasher.HashPassword(dto.NewPassword, newSalt); // Das neue Passwort wird mithilfe des neuen Salt-Werts gehasht
++
++        // Anschließend werden das gehashte neue Passwort und der Salt im Benutzerobjekt gespeichert.
++        user.Password = newHash;
++        user.Salt = newSalt;
++
++        await _repository.SaveChangesAsync(cancellationToken); // Die Änderungen am Benutzer werden nun dauerhaft in der Datenbank gespeichert
++
++        // Am Ende wird true zurückgegeben, um den erfolgreichen Passwortwechsel zu bestätigen
++        return true;
++    }
++
+ }
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Api/Features/Users/UserModule.cs M3_abgabe/repo/apps/dotnet/src/Api/Features/Users/UserModule.cs
+--- a/apps/dotnet/src/Api/Features/Users/UserModule.cs	2025-05-19 15:15:58.000000000 +0200
++++ b/apps/dotnet/src/Api/Features/Users/UserModule.cs	2025-06-13 19:03:09.000000000 +0200
+@@ -27,7 +27,7 @@
+                 {
+                     if (!MiniValidator.TryValidate(request, out var errors))
+                         return Results.ValidationProblem(errors);
+-                    
++
+                     var username = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
+                     var user = await userHandler.UpdateAsync(username!, request.User, new CancellationToken());
+                     return Results.Ok(new UserEnvelope<UserDto>(user));
+@@ -69,5 +69,40 @@
+             .WithTags("User")
+             .WithName("LoginUser")
+             .IncludeInOpenApi().ProducesValidationProblem();
++
++        // Diese Route ermöglicht es einem angemeldeten Benutzer, sein Passwort zu ändern, dabei wird zuerst das aktuelle Passwort überprüft
++        // Wenn es korrekt ist, wird ein neues gehashtes Passwort gespeichert
++        app.MapPut("/user/password",
++                [Authorize] async (
++                    IUserHandler userHandler,
++                    ClaimsPrincipal claimsPrincipal,
++                    ChangePasswordDto request,
++                    CancellationToken cancellationToken
++                ) =>
++                {
++                    // Zuerst wird der Benutzername aus dem Authentifizierungs-Token ausgelesen
++                    var username = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
++
++                    // Falls kein Benutzername im Token gefunden wurde, wird 401 Unauthorized zurückgegeben
++                    if (string.IsNullOrWhiteSpace(username))
++                        return Results.Unauthorized();
++
++                    // Dann wird die Methode ChangePasswordAsync aufgerufen, die das alte Passwort prüft und bei Erfolg das neue speichert
++                    var result = await userHandler.ChangePasswordAsync(username, request, cancellationToken);
++
++                    // Wenn das Passwort erfolgreich geändert wurde, wird eine Erfolgsmeldung zurückgegeben.
++                    // ansonsten, erfolgt eine Fehlermeldung mit Status 400.
++                    return result
++                        ? Results.Ok(new { message = "Password changed successfully" })
++                        : Results.BadRequest(new { message = "Incorrect current password" });
++                })
++            // Möglische Statuscodes
++            .Produces(200) // Erfolgreiche Änderung
++            .Produces(400) // Fehlerhafte Eingab
++            .Produces(401) // Nicht autorisiert
++            .WithTags("User")
++            .WithName("ChangePassword")
++            .IncludeInOpenApi();
++
+     }
+ }
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Api/Utils/PasswordHasher.cs M3_abgabe/repo/apps/dotnet/src/Api/Utils/PasswordHasher.cs
+--- a/apps/dotnet/src/Api/Utils/PasswordHasher.cs	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/dotnet/src/Api/Utils/PasswordHasher.cs	2025-06-13 19:03:09.000000000 +0200
+@@ -0,0 +1,40 @@
++﻿using System.Security.Cryptography;
++using System.Text;
++
++namespace Realworlddotnet.Api.Utils;
++
++// Die klasse PasswordHasher stellt Methoden zum Hashen, Salten und Verifizieren von Passwörtern bereit, sie wird verwendet, um Benutzerpasswörter nicht im Klartext zu speichern 
++public static class PasswordHasher
++{
++
++    // Diese Methode generiert einen zufälligen Salt-Wert, der später zum Hashing des Passworts verwendet wird
++    public static string GenerateSalt()
++    {
++        var saltBytes = new byte[16]; // Der Salt besteht aus 16 Bytes
++        using (var rng = RandomNumberGenerator.Create()) // Hier wird ein kryptografisch sicherer Zufallsgenerator verwendet
++        {
++            rng.GetBytes(saltBytes); // Dann werden die Bytes mit Zufallswerten gefüllt
++        }
++        return Convert.ToBase64String(saltBytes); // und der Salt wird in eine lesbare Zeichenkette umgewandelt
++    }
++
++    // Diese Methode erzeugt aus einem Passwort und einem Salt einen Hash
++    public static string HashPassword(string password, string salt)
++    {
++        var combined = Encoding.UTF8.GetBytes(password + salt); // Zuerst werden Passwort und Salt zusammengeführt und in Bytes umgewandelt
++        using (var sha256 = SHA256.Create()) // dann wird SHA-256 als Hashing-Algorithmus verwendet
++        {
++            var hash = sha256.ComputeHash(combined); // Der kombinierte Byte-Array wird gehasht
++            return Convert.ToBase64String(hash); // und das Ergebnis wird in eine Zeichenkette umgewandelt
++        }
++    }
++
++    // Diese Methode prüft, ob ein eingegebenes Passwort dem in der Datenbank gespeicherten Hash entsprich
++    public static bool VerifyPassword(string enteredPassword, string storedHash, string storedSalt)
++    {
++        // Dazu wird das eingegebene Passwort mit dem gespeicherten Salt erneut gehasht und mit dem gespeicherten Hash verglichen
++        var hashOfEntered = HashPassword(enteredPassword, storedSalt);
++        return hashOfEntered == storedHash;
++    }
++
++}
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Core/Dto/ChangePasswordDto.cs M3_abgabe/repo/apps/dotnet/src/Core/Dto/ChangePasswordDto.cs
+--- a/apps/dotnet/src/Core/Dto/ChangePasswordDto.cs	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/dotnet/src/Core/Dto/ChangePasswordDto.cs	2025-06-13 19:03:09.000000000 +0200
+@@ -0,0 +1,10 @@
++namespace Realworlddotnet.Core.Dto;
++
++
++// Die Klasse ChangePasswordDto wird verwendet, um die Daten vom Frontend an das Backend zu übergeben,
++// wenn ein Benutzer sein Passwort ändern möchte
++public class ChangePasswordDto
++{
++    public string CurrentPassword { get; set; } = string.Empty; // Dieses Feld speichert das aktuell verwendete Passwort des Benutzers
++    public string NewPassword { get; set; } = string.Empty; // Dieses Feld speichert das neue Passwort, das der Benutzer setzen möchte
++}
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Core/Dto/UserDto.cs M3_abgabe/repo/apps/dotnet/src/Core/Dto/UserDto.cs
+--- a/apps/dotnet/src/Core/Dto/UserDto.cs	2025-05-19 15:15:58.000000000 +0200
++++ b/apps/dotnet/src/Core/Dto/UserDto.cs	2025-06-13 19:03:09.000000000 +0200
+@@ -9,16 +9,20 @@
+ /// <summary>
+ ///     At lease one of the items should be not null
+ /// </summary>
++
++
++// Das Feld Password wurde aus der ursprünglichen UpdatedUserDto entfernt, weil die Passwortänderung erfolgt jetzt getrennt über das neue DTO ChangePasswordDto,
++// dadurch wird das Aktualisieren der Profildaten klar getrennt vom Ändern des Passworts
+ public record UpdatedUserDto
+-    (string? Username, string? Email, string? Bio, string? Image, string? Password) : IValidatableObject
++    (string? Username, string? Email, string? Bio, string? Image) : IValidatableObject
+ {
+     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+     {
+         if (string.IsNullOrWhiteSpace(Username) && string.IsNullOrWhiteSpace(Email) &&
+-            string.IsNullOrWhiteSpace(Bio) && string.IsNullOrWhiteSpace(Image) && string.IsNullOrWhiteSpace(Password))
++            string.IsNullOrWhiteSpace(Bio) && string.IsNullOrWhiteSpace(Image))
+         {
+             yield return new ValidationResult(
+-                $"At least on of the fields: {nameof(Username)}, {nameof(Email)}, {nameof(Bio)}, {nameof(Image)}, {nameof(Password)} must be filled"
++                $"At least on of the fields: {nameof(Username)}, {nameof(Email)}, {nameof(Bio)}, {nameof(Image)} must be filled"
+             );
+         }
+     }
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Core/Entities/User.cs M3_abgabe/repo/apps/dotnet/src/Core/Entities/User.cs
+--- a/apps/dotnet/src/Core/Entities/User.cs	2025-05-19 15:15:58.000000000 +0200
++++ b/apps/dotnet/src/Core/Entities/User.cs	2025-06-13 19:03:09.000000000 +0200
+@@ -14,6 +14,22 @@
+         Username = newUser.Username;
+         Email = newUser.Email;
+     }
++    
++
++    //---------------------------------------
++
++    //  Dieser Konstruktor wird verwendet, wenn ein Benutzer mit einem bereits gehashten Passwort und einem Salt angelegt wird
++    public User(NewUserDto newUser, string hashedPassword, string salt)
++    {
++        // Dabei wird das Passwort nicht mehr im Klartext, sondern als Hash gespeichert, und der verwendete Salt wird separat hinterlegt
++        Password = hashedPassword;
++        Salt = salt;
++
++        Username = newUser.Username;
++        Email = newUser.Email;
++    }
++
++     //---------------------------------------
+ 
+     public string Username { get; set; } = default!;
+ 
+@@ -25,6 +41,10 @@
+ 
+     public string Image { get; set; } = string.Empty;
+ 
++
++    public string Salt { get; set; } = default!; // Diese neue Eigenschaft speichert den generierten Salt-Wert für das Passwort des Benutzer
++
++
+     public ICollection<ArticleFavorite>? ArticleFavorites { get; set; }
+     public ICollection<Comment>? ArticleComments { get; set; }
+ 
+@@ -38,6 +58,5 @@
+         Email = updatedUser.Email ?? Email;
+         Bio = updatedUser.Bio ?? Bio;
+         Image = updatedUser.Image ?? Image;
+-        Password = updatedUser.Password ?? Password;
+     }
+ }
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Data/Migrations/20250522142954_AddSaltToUser.cs M3_abgabe/repo/apps/dotnet/src/Data/Migrations/20250522142954_AddSaltToUser.cs
+--- a/apps/dotnet/src/Data/Migrations/20250522142954_AddSaltToUser.cs	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/dotnet/src/Data/Migrations/20250522142954_AddSaltToUser.cs	2025-06-13 19:03:09.000000000 +0200
+@@ -0,0 +1,45 @@
++﻿using Microsoft.EntityFrameworkCore.Migrations;
++
++#nullable disable
++
++namespace Realworlddotnet.Data.Migrations
++{
++
++
++    // Diese Datei wurde automatisch durch den Befehl `dotnet ef migrations add AddSaltToUser` erzeugt
++    // Sie beschreibt die Änderungen an der Datenbankstruktur in zwei Methoden:
++    //
++    // - Up():    Hier wird definiert, wie die Datenbank erweitert wird, z.b durch eine neue Spalte Salt,
++    //            um Salt-Werte pro Benutzer zu speichern
++
++    // - Down():  Hier wird beschrieben, wie diese Änderungen wieder rückgängig gemacht werden können
++
++    // Diese Datei wird von EF Core beim Ausführen einer Migration tatsächlich verwendet,
++    // z.B mit `dotnet ef database update`, um die Datenbankstruktur an den aktuellen Code anzupassen
++
++
++    /// <inheritdoc />
++    public partial class AddSaltToUser : Migration
++    {
++        /// <inheritdoc />
++        protected override void Up(MigrationBuilder migrationBuilder)
++        {
++            // Neues Feld: Salt für individuelle Passwort-Salts
++            migrationBuilder.AddColumn<string>(
++                name: "Salt",
++                table: "Users",
++                type: "TEXT",
++                nullable: false,
++                defaultValue: "");
++        }
++
++        /// <inheritdoc />
++        protected override void Down(MigrationBuilder migrationBuilder)
++        {
++            // Salt-Spalte wieder entfernen
++            migrationBuilder.DropColumn(
++                name: "Salt",
++                table: "Users");
++        }
++    }
++}
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Data/Migrations/MissingMigration.sql M3_abgabe/repo/apps/dotnet/src/Data/Migrations/MissingMigration.sql
+--- a/apps/dotnet/src/Data/Migrations/MissingMigration.sql	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/dotnet/src/Data/Migrations/MissingMigration.sql	2025-06-13 19:03:09.000000000 +0200
+@@ -0,0 +1,10 @@
++CREATE TABLE IF NOT EXISTS "__EFMigrationsHistory" (
++    "MigrationId" TEXT NOT NULL CONSTRAINT "PK___EFMigrationsHistory" PRIMARY KEY,
++    "ProductVersion" TEXT NOT NULL
++);
++
++INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
++VALUES ('20211107084644_Initial', '7.0.5');
++
++INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
++VALUES ('20250425102547_ConductStatisticMigration', '7.0.5');
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Data/Services/ConduitRepository.cs M3_abgabe/repo/apps/dotnet/src/Data/Services/ConduitRepository.cs
+--- a/apps/dotnet/src/Data/Services/ConduitRepository.cs	2025-05-19 15:15:58.000000000 +0200
++++ b/apps/dotnet/src/Data/Services/ConduitRepository.cs	2025-06-13 19:03:09.000000000 +0200
+@@ -52,7 +52,8 @@
+ 
+     public async Task<User?> GetUserByEmailAsync(string email)
+     {
+-        return await _context.Users.AsNoTracking().FirstOrDefaultAsync(x => x.Email == email);
++        // AsNoTracking() wurde entfernt, damit das User-Objekt vom Kontext erfasst wird und später verändert oder gespeichert werden kann, weil mit AsNoTracking() Änderungen am Objekt nicht möglich wären
++        return await _context.Users.FirstOrDefaultAsync(x => x.Email == email);
+     }
+ 
+     public async Task<List<ArticleFavorite>> GetLikedArticles()
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/tst/Unit.Tests/Assignment_3_Test_Cases/PasswordHashingTest.cs M3_abgabe/repo/apps/dotnet/tst/Unit.Tests/Assignment_3_Test_Cases/PasswordHashingTest.cs
+--- a/apps/dotnet/tst/Unit.Tests/Assignment_3_Test_Cases/PasswordHashingTest.cs	2025-05-19 15:15:58.000000000 +0200
++++ b/apps/dotnet/tst/Unit.Tests/Assignment_3_Test_Cases/PasswordHashingTest.cs	2025-06-13 19:03:09.000000000 +0200
+@@ -9,29 +9,91 @@
+ {
+     [Fact(DisplayName = "Assignment 3 - Unit Test Password Hashing"),
+      Trait("Number", "3.1")]
++
++
++    // In diesem Test wird geprüft, ob die Hashing-Funktion ein nicht-leeres Ergebnis liefert und der Hash eine Mindestlänge hat
+     public Task CheckPasswordHashing()
+     {
+-        throw new NotImplementedException();
++        string password = "meinPasswort123";  // Hier wird ein Beispielpasswort festgelegt, das gehasht werden soll
++        string salt = "testsalt123";  // Zusätzlich wird ein Beispiel-Salt definiert
++
++        string hash = Realworlddotnet.Api.Utils.PasswordHasher.HashPassword(password, salt); // Das Passwort wird zusammen mit dem Salt gehasht
++
++        Assert.False(string.IsNullOrWhiteSpace(hash)); // Es wird überprüft, ob das Ergebnis nicht leer ist
++        Assert.True(hash.Length >= 30); // Es wird auch sichergestellt, dass der Hash eine Mindestlänge hat (z.b 30 Zeichen, weil SHA256 in Base64 etwa 44 Zeichen ergibt)
++
++        return Task.CompletedTask; // Und am end wird der Test abgeschlossen
+     }
+-    
++
+     [Fact(DisplayName = "Assignment 3 - Unit Test Password Salting"),
+      Trait("Number", "3.2")]
++
++    // In diesem Test wird überprüft, ob zwei unabhängig erzeugte Salts unterschiedlich sind und nicht leer sind
+     public Task CheckPasswordSalting()
+     {
+-        throw new NotImplementedException();
++        // Zwei Salts werden unabhängig voneinander generiert
++        string salt1 = Realworlddotnet.Api.Utils.PasswordHasher.GenerateSalt();
++        string salt2 = Realworlddotnet.Api.Utils.PasswordHasher.GenerateSalt();
++
++        // Hier wird es überprüft, dass beide Salts nicht leer sind
++        Assert.False(string.IsNullOrWhiteSpace(salt1));
++        Assert.False(string.IsNullOrWhiteSpace(salt2));
++
++        // und dann wird es geprüft, ob beide Salts unterschiedlich sind
++        Assert.NotEqual(salt1, salt2);
++
++        return Task.CompletedTask; // Der Test wird abgeschlossen
+     }
+-    
++
+     [Fact(DisplayName = "Assignment 3 - Unit Test Password Hashing and Salting"),
+      Trait("Number", "3.3")]
++
++    // In diesem Test wird kontrolliert, ob das gleiche Passwort mit zwei unterschiedlichen Salts zu zwei verschiedenen Hashes führt
+     public Task CheckPasswordHashingAndSalting()
+     {
+-        throw new NotImplementedException();
++
++        string password = "geheim"; // Es wird ein Beispielpasswort definiert, das mit verschiedenen Salts gehasht wird
++
++        // Zwei verschiedene Salts werden erzeugt
++        string salt1 = Realworlddotnet.Api.Utils.PasswordHasher.GenerateSalt();
++        string salt2 = Realworlddotnet.Api.Utils.PasswordHasher.GenerateSalt();
++
++        // Das Passwort wird einmal mit salt1 und einmal mit salt2 gehasht
++        string hash1 = Realworlddotnet.Api.Utils.PasswordHasher.HashPassword(password, salt1);
++        string hash2 = Realworlddotnet.Api.Utils.PasswordHasher.HashPassword(password, salt2);
++
++        // und dann wird es geprüft, ob beide Hashes unterschiedlich sind
++        Assert.NotEqual(hash1, hash2);
++
++        return Task.CompletedTask; // Der Test wird abgeschlossen
++
+     }
+-    
++
+     [Fact(DisplayName = "Assignment 3 - Unit Test Password Storing"),
+      Trait("Number", "3.4")]
++
++    // In diesem Test wird geprüft, ob beim Erstellen eines neuen Nutzers mit gehashtem Passwort und Salt die Felder korrekt gesetzt werden
+     public async Task CheckPasswordStoring()
+     {
+-        throw new NotImplementedException();
++        // Ein neues User-DTO wird erzeugt mit Benutzername, E-Mail und Klartextpasswort
++        var newUserDto = new Realworlddotnet.Core.Dto.NewUserDto(
++        "testuser",
++        "test@example.com",
++        "supersecure"
++        );
++
++        var salt = Realworlddotnet.Api.Utils.PasswordHasher.GenerateSalt(); // Salt wird erzeugt
++        var hashedPassword = Realworlddotnet.Api.Utils.PasswordHasher.HashPassword(newUserDto.Password, salt); // und as Passwort wird mit dem Salt gehasht
++
++        // Ein neues User-Objekt wird mit dem DTO, dem gehashten Passwort und dem Salt erstellt
++        var user = new Realworlddotnet.Core.Entities.User(newUserDto, hashedPassword, salt);
++
++        // Es wird geprüft, ob der Benutzername und die E-Mail korrekt übernommen wurden
++        Assert.Equal("testuser", user.Username);
++        Assert.Equal("test@example.com", user.Email);
++
++        // und ob das Passwort mit dem Salt-Wert korrekt gehasht und im Objekt gespeichert wurde
++        Assert.Equal(hashedPassword, user.Password);
++        Assert.Equal(salt, user.Salt);
+     }
+ }
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/bloc/register_bloc/register_bloc.dart M3_abgabe/repo/apps/flutter/lib/bloc/register_bloc/register_bloc.dart
+--- a/apps/flutter/lib/bloc/register_bloc/register_bloc.dart	2025-05-19 15:15:58.000000000 +0200
++++ b/apps/flutter/lib/bloc/register_bloc/register_bloc.dart	2025-06-13 19:03:09.000000000 +0200
+@@ -20,7 +20,12 @@
+       emit(RegisterLoadingState(authModel: event.authModel));
+       Response data = await repo.register(event.authModel);
+       print("register $data");
+-      if (data.statusCode == 201) {
++
++      //-----registrierung flutter------------------
++      // Akzeptiere sowohl Statuscode 201 (Created) als auch 200 (OK) als erfolgreiche Antwort der Registrierung
++      if (data.statusCode == 201 || data.statusCode == 200) {
++        //--------------------------------------------
++
+         emit(
+           RegisterDoneState(msg: "User Created successfuly"),
+         );
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/config/constant.dart M3_abgabe/repo/apps/flutter/lib/config/constant.dart
+--- a/apps/flutter/lib/config/constant.dart	2025-05-19 15:15:58.000000000 +0200
++++ b/apps/flutter/lib/config/constant.dart	2025-06-13 19:03:09.000000000 +0200
+@@ -29,6 +29,11 @@
+   /*#20*/ static const ARTICLE_BY_TAG = BASE_URL + SUB_URL + "/articles?tag=";
+   /*#21*/ static const SEARCH_QUERY = BASE_URL + SUB_URL + "/search?query=";
+ 
++  //---Passwort flutter Endpunkt (URL definieren)-----------
++  // Endpunkt für das Ändern des Passworts mit Eingabe des alten Passworts
++  /*#22*/ static const CHANGE_PASSWORD = BASE_URL + "/user/password";
++  //--------------------------------
++
+   static const TOKEN =
+       "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJiaWdnb29zZTE4MyIsIm5iZiI6MTcxNTc4NzYyNCwiZXhwIjoxNzE1NzkxMjI0LCJpc3MiOiJ0aGVjbGllbnRpZCIsImF1ZCI6Imh0dHBzOi8vQUFBU19QTEFURk9STS9pZHAvWU9VUl9URU5BTlQvYXV0aG4vdG9rZW4ifQ.sbAL4D2aHD02NeLZPorTvhllA4lkulAMUpchM6j6nanes7ISTevjcEawJt3c8R2arEivN0-hnq69U4Osyxq410_g8FYoUwhBMkcIu50_8gUDYIY56MB3IVBkcbQ5_JTgBZY_xjIFtIfbkCm0nr8_LFob8ErGlc5cdPFWpEWnwbUSFIBI7CQMSNCBjzitv2FLY0aWXid6R4GMW6MZy7n1m9jCnrFnuJr_k0oyoC7ceRYuHkiZgxcbuqOsqDjl3md1E8bcBCMgu1SUxqf9R_SzgNqOpbkpJ3Xwfo4kHKtZpiK7AQO_GXc5Pyozj06oqE3gfYsjJ0iBwx0Dwm1uAup19A";
+ }
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/model/profile_model.dart M3_abgabe/repo/apps/flutter/lib/model/profile_model.dart
+--- a/apps/flutter/lib/model/profile_model.dart	2025-05-19 15:15:58.000000000 +0200
++++ b/apps/flutter/lib/model/profile_model.dart	2025-06-13 19:03:09.000000000 +0200
+@@ -62,12 +62,19 @@
+   }
+ }
+ 
++//----Passwort flutter validieren ----------
++//Unterstützung für sichere Passwortänderung
++
+ class User {
+   String? email;
+   String? username;
+   String? bio;
+   String? image;
+   String? password;
++  //--1/4-----------------------
++  String?
++      oldPassword; // Das alte Passwort, das beim Ändern des Passworts zur Verifizierung benötigt wird
++  //-------------------------
+ 
+   User({
+     this.email,
+@@ -75,6 +82,9 @@
+     this.bio,
+     this.image,
+     this.password,
++    //--2/4-----------------------
++    this.oldPassword, // Initialisierung des alten Passworts im Konstruktor
++    //-------------------------
+   });
+ 
+   User.fromJson(Map<String, dynamic> json) {
+@@ -83,6 +93,10 @@
+     bio = json['bio'];
+     image = json['image'];
+     password = json['password'];
++    //--3/4-----------------------
++    oldPassword = json[
++        'oldPassword']; // Auslesen des alten Passworts aus dem empfangenen JSON-Objekt
++    //-------------------------
+   }
+ 
+   Map<String, dynamic> toJson() {
+@@ -92,6 +106,10 @@
+     data['bio'] = this.bio;
+     data['image'] = this.image;
+     data['password'] = this.password;
++    //--4/4-----------------------
++    data['oldPassword'] = this
++        .oldPassword; // Hinzufügen des alten Passworts zum JSON-Objekt für das Backend
++    //-------------------------
+     return data;
+   }
+ }
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/repository/all_article_repo.dart M3_abgabe/repo/apps/flutter/lib/repository/all_article_repo.dart
+--- a/apps/flutter/lib/repository/all_article_repo.dart	2025-05-19 15:15:58.000000000 +0200
++++ b/apps/flutter/lib/repository/all_article_repo.dart	2025-06-13 19:03:09.000000000 +0200
+@@ -310,7 +310,10 @@
+   }
+ 
+   Future changePassword(ProfileModel profileModel) async {
+-    String url = ApiConstant.UPDATE_USER;
++    //--Passwort flutter Endpunkt (URL verwenden)---------------
++    //Endpunkt für sichere Passwortänderung mit Eingabe des alten Passworts
++    String url = ApiConstant.CHANGE_PASSWORD;
++    //---------------------------------
+     Map<String, dynamic> body = profileModel.toJson();
+     http.Response response =
+         await UserClient.instance.doChangePassword(url, body);
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/repository/auth_repo.dart M3_abgabe/repo/apps/flutter/lib/repository/auth_repo.dart
+--- a/apps/flutter/lib/repository/auth_repo.dart	2025-05-19 15:15:58.000000000 +0200
++++ b/apps/flutter/lib/repository/auth_repo.dart	2025-06-13 19:03:09.000000000 +0200
+@@ -32,7 +32,13 @@
+         message += 'username $usernameError';
+       }
+     }
+-    if (response.statusCode == 201) {
++
++    //-----registrierung flutter------------------
++    // Akzeptiere sowohl Statuscode 201 (Created) als auch 200 (OK)
++    // als erfolgreiche Registrierung, um unterschiedliche Backend-Antworten abzudecken
++    if (response.statusCode == 201 || response.statusCode == 200) {
++      //--------------------------------------------
++
+       return response;
+     } else {
+       throw message;
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/services/user_client.dart M3_abgabe/repo/apps/flutter/lib/services/user_client.dart
+--- a/apps/flutter/lib/services/user_client.dart	2025-05-19 15:15:58.000000000 +0200
++++ b/apps/flutter/lib/services/user_client.dart	2025-06-13 19:03:09.000000000 +0200
+@@ -269,16 +269,24 @@
+     if (header != null) {
+       head.addAll(header);
+     }
+-    ProfileModel profileModel = ProfileModel(
+-      user: User(
+-        password: body.values.first['password'],
+-      ),
+-    );
++
++    //--Passwort flutter JSON-Body für alten und neuen Wert vorbereiten-------
++
++    //--1/2---------------------------------------------
++    // Erstellt den JSON-Body mit altem und neuem Passwort für die Passwortänderung
++    final jsonBody = {
++      "currentPassword": body['user']['oldPassword'],
++      "newPassword": body['user']['password']
++    };
++    //-----------------------------------------------
+ 
+     try {
+       http.Response response = await http.put(
+         Uri.parse(url),
+-        body: jsonEncode(profileModel.toJson()),
++        //--2/2---------------------------------------------
++        body:
++            jsonEncode(jsonBody), // Kodiert den JSON-Body für den HTTP-Request
++        //-----------------------------------------------
+         headers: head,
+       );
+       // print("password updated data is =====> ${response.body}");
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/ui/change_password/change_password_screen.dart M3_abgabe/repo/apps/flutter/lib/ui/change_password/change_password_screen.dart
+--- a/apps/flutter/lib/ui/change_password/change_password_screen.dart	2025-05-19 15:15:58.000000000 +0200
++++ b/apps/flutter/lib/ui/change_password/change_password_screen.dart	2025-06-13 19:03:09.000000000 +0200
+@@ -20,21 +20,57 @@
+   State<ChangePasswordScreen> createState() => _ChangePasswordScreenState();
+ }
+ 
++//--Passwort flutter (feld UI und Logik)------
++
+ class _ChangePasswordScreenState extends State<ChangePasswordScreen> {
++  //--1/6-----------------------------------
++  // Controller für das Eingabefeld des aktuellen (alten) Passworts
++  TextEditingController oldPasswordCtr = TextEditingController();
++  //-------------------------------------
++
+   TextEditingController passwordCtr = TextEditingController();
+   TextEditingController confirmPasswordCtr = TextEditingController();
+   GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+   bool isLoading = false;
+   bool isNoInternet = false;
++
++  //--2/6-----------------------------------
++  // Steuert die Sichtbarkeit des alten Passwortfeldes (true = verborgen)
++  bool _obsecureTextOld = true;
++  //-------------------------------------
++  
+   bool _obsecureText = false;
+   bool _obsecureText2 = false;
+   late ProfileBloc profileBloc;
++
+   @override
+   void initState() {
+     profileBloc = context.read<ProfileBloc>();
+     super.initState();
+   }
+ 
++  //--3/6------------------------------------
++  //Verwalten der Ressourcen und Passwortsichtbarkeit
++  @override
++  void dispose() {
++    oldPasswordCtr
++        .dispose(); //Gibt den verwendeten Controller für das alte Passwortfeld frei
++    passwordCtr
++        .dispose(); //Gibt den verwendeten Controller für das neue Passwortfeld frei
++    confirmPasswordCtr
++        .dispose(); //Gibt den verwendeten Controller für das Bestätigungsfeld des Passworts frei
++    super
++        .dispose(); //Ruft die dispose-Methode der Elternklasse auf, um verbleibende Ressourcen freizugeben
++  }
++
++  _toggleObscuredOld() {
++    setState(() {
++      _obsecureTextOld =
++          !_obsecureTextOld; //Schaltet den Sichtbarkeitsstatus des alten Passwortfelds um (zeigen/verbergen)
++    });
++  }
++  //---------------------------------------
++
+   _toggleObscured() {
+     setState(() {
+       _obsecureText = !_obsecureText;
+@@ -91,6 +127,10 @@
+                     CToast.instance.showError(context, NO_INTERNET);
+                   }
+                   if (state is ChangePasswordSuccessState) {
++                    //--4/6-----------------------------
++                    //Leert das Texteingabefeld für das alte Passwort nach erfolgreicher Änderung
++                    oldPasswordCtr.clear();
++                    //-------------------------------
+                     passwordCtr.clear();
+                     confirmPasswordCtr.clear();
+                     CToast.instance.dismiss();
+@@ -115,6 +155,67 @@
+                         SizedBox(
+                           height: 50,
+                         ),
++
++
++                        //--5/6------------------------------------------------------------------------
++                        // UI von Eingabefeld für das aktuelle Passwort mit Validierung und Sichtbarkeitsumschaltung
++                        Container(
++                          padding: EdgeInsets.only(right: 20, left: 20),
++                          child: Column(
++                            children: [
++                              TextFormField(
++                                autofocus: false,
++                                obscureText: _obsecureTextOld,
++                                cursorColor: AppColors.primaryColor,
++                                inputFormatters: [
++                                  FilteringTextInputFormatter.deny(' '),
++                                  LengthLimitingTextInputFormatter(16)
++                                ],
++                                style: TextStyle(
++                                  color: Colors.black,
++                                ),
++                                validator: (value) {
++                                  if (value == null || value.trim().isEmpty) {
++                                    return "Please enter your current password";
++                                  }
++                                  return null;
++                                },
++                                decoration: InputDecoration(
++                                  filled: true,
++                                  fillColor: AppColors.white2,
++                                  contentPadding: const EdgeInsets.all(10),
++                                  prefixIcon: Icon(
++                                    CupertinoIcons.lock_rotation_open,
++                                    color: AppColors.primaryColor,
++                                  ),
++                                  suffixIcon: InkWell(
++                                    onTap: _toggleObscuredOld,
++                                    child: Transform.scale(
++                                      scale: 0.9,
++                                      child: Icon(
++                                        _obsecureTextOld
++                                            ? Icons.visibility_off
++                                            : Icons.visibility,
++                                        color: AppColors.primaryColor,
++                                      ),
++                                    ),
++                                  ),
++                                  border: OutlineInputBorder(
++                                    borderRadius: BorderRadius.circular(10),
++                                  ),
++                                  hintText: "Enter Current Password",
++                                ),
++                                controller: oldPasswordCtr,
++                              )
++                            ],
++                          ),
++                        ),
++                        SizedBox(
++                          height: 20,
++                        ),
++                        //--------------------------------------------------------------------------
++
++
+                         Container(
+                           padding: EdgeInsets.only(right: 20, left: 20),
+                           child: Column(
+@@ -293,6 +394,13 @@
+                                       profileModel: ProfileModel(
+                                         user: User(
+                                           password: passwordCtr.text.toString(),
++                                          
++                                          //--6/6---------------------
++                                          //Übergibt das eingegebene alte Passwort zur Validierung an das Backend
++                                          oldPassword:
++                                              oldPasswordCtr.text.toString(),
++                                          //-----------------------
++
+                                         ),
+                                       ),
+                                     ),
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/ui/global/global.dart M3_abgabe/repo/apps/flutter/lib/ui/global/global.dart
+--- a/apps/flutter/lib/ui/global/global.dart	2025-05-19 15:15:58.000000000 +0200
++++ b/apps/flutter/lib/ui/global/global.dart	2025-06-13 19:03:09.000000000 +0200
+@@ -1,3 +1,8 @@
++// Das ursprüngliche Problem war, dass Tags und Artikel nicht zuverlässig angezeigt wurden, da sie nicht synchron oder in falscher Reihenfolge geladen wurden
++// Die Lösung besteht darin, Tags beim Laden der Seite separat per Event anzufragen und erst nach erfolgreichem Laden (über den Bloc-State) die Artikel anzufordern
++// Dadurch werden sowohl Tags als auch Artikel stabil und vollständig geladen
++
++
+ import 'package:conduit/bloc/all_articles_bloc/all_articles_bloc.dart';
+ import 'package:conduit/bloc/all_articles_bloc/all_articles_state.dart';
+ import 'package:conduit/bloc/search_bloc/search_event.dart';
+@@ -46,12 +51,15 @@
+   TextEditingController searchCtrKW = TextEditingController();
+   @override
+   void initState() {
++    super.initState();
+     _scrollController = ScrollController();
+     tagsBloc = context.read<TagsBloc>();
+     articlesBloc = context.read<AllArticlesBloc>();
+-    
+-    tagsBloc.add(FetchAllTagsEvent());
+-    articlesBloc.add(FetchAllArticlesEvent());
++
++    // Diese neue Methode stellt sicher, dass die Tags vollständig vom Server geladen wurden, bevor die Artikel geladen werden,
++    // also das verhindert das frühzeitige Rendern von Artikeln ohne zugehörige Tags und löst damit
++    // das nicht-deterministische Anzeigeproblem
++    loadTagsThenArticles();
+ 
+     _scrollController.addListener(() async {
+       if (_scrollController.position.atEdge &&
+@@ -60,9 +68,33 @@
+         articlesBloc.add(FetchNextAllArticlesEvent(length: await length));
+       }
+     });
+-    super.initState();
+   }
+ 
++// Anzeigeproblem-Flutter
++//--------------------------------------------------------------------------------------------
++
++  Future<void> loadTagsThenArticles() async {
++
++    // Ein Event wird an den TagsBloc gesendet, um alle verfügbaren Tags vom Server zu laden
++    tagsBloc.add(FetchAllTagsEvent());
++
++    // Hier wird gewartet, bis einer der möglichen Endzustände des TagsBloc eintritt, also 
++    // entweder erfolgreicher Tag-Download, keine Tags vorhanden oder ein Fehler
++    // So wird sichergestellt, dass die Tags fertig verarbeitet wurden
++    await tagsBloc.stream.firstWhere((state) =>
++      state is TagsSuccessState ||
++      state is TagsNoTagState ||
++      state is TagsErrorState
++    );
++    
++    // Nachdem ein Endzustand erreicht wurde, wird ein Event an den ArticlesBloc gesendet,
++    // um anschließend die Artikel zu laden
++    articlesBloc.add(FetchAllArticlesEvent());
++  }
++
++//--------------------------------------------------------------------------------------------
++
++
+   onRefreshAll() {
+     setState(() {
+       isNoInternet = false;
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/ui/register/register_screen.dart M3_abgabe/repo/apps/flutter/lib/ui/register/register_screen.dart
+--- a/apps/flutter/lib/ui/register/register_screen.dart	2025-05-19 15:15:58.000000000 +0200
++++ b/apps/flutter/lib/ui/register/register_screen.dart	2025-06-13 19:03:09.000000000 +0200
+@@ -2,8 +2,10 @@
+ import 'package:conduit/bloc/register_bloc/register_event.dart';
+ import 'package:conduit/bloc/register_bloc/register_state.dart';
+ import 'package:conduit/config/constant.dart';
++import 'package:conduit/config/hive_store.dart';
+ import 'package:conduit/main.dart';
+ import 'package:conduit/model/auth_model.dart';
++import 'package:conduit/model/user_model.dart';
+ import 'package:conduit/ui/login/login_screen.dart';
+ import 'package:conduit/utils/AppColors.dart';
+ import 'package:conduit/utils/message.dart';
+@@ -17,6 +19,7 @@
+ import 'package:flutter/services.dart';
+ import 'package:flutter_bloc/flutter_bloc.dart';
+ import '../../bloc/register_bloc/register_bloc.dart';
++import 'package:conduit/ui/base/base_screen.dart'; // Import der Basis-Screen-Klasse für die Navigation nach erfolgreicher Registrierung
+ 
+ class RegisterScreen extends StatefulWidget {
+   static const registerUrl = '/register';
+@@ -120,10 +123,63 @@
+                 CToast.instance.dismiss();
+                 CToast.instance.showError(context, NO_INTERNET);
+               }
++              
++              //----registrierung flutter----------------------
++
++              // Sobald der Zustand RegisterDoneState erreicht ist, bedeutet das, dass die Registrierung erfolgreich abgeschlossen wurde
+               if (state is RegisterDoneState) {
+-                CToast.instance.dismiss();
+-                Navigator.pushNamedAndRemoveUntil(
+-                    context, LoginScreen.loginUrl, (route) => route.isFirst);
++                CToast.instance.dismiss(); // Zuvor angezeigte Lade- oder Statusmeldungen werden ausgeblendet
++
++                // Danach wird automatisch ein Login-Vorgang gestartet,
++                // um den Benutzer direkt einzuloggen und den JWT-Token zu speichern
++                Future.microtask(() async {
++
++                  // Die Login-Daten werden aus den Eingabefeldern (Email und Passwort) erstellt
++                  AuthModel loginModel = AuthModel(
++                    email: emailCtr.text.trim(),
++                    password: passwordctr.text.trim(),
++                  );
++                  try {
++
++                    // Mit diesen Login-Daten wird ein Login-Request an das Backend geschickt.
++                    final loginResponse = await registerBloc.repo.login(loginModel);
++
++                    // Wenn der Server eine gültige Antwort inklusive Benutzerinformationen zurückgibt,
++                    // wird der Token aus der Antwort extrahiert
++                    if (loginResponse != null && loginResponse['user'] != null) {
++                      final token = loginResponse['user']['token'];
++                      
++                      // Die Benutzerdaten (inklusiv Token) werden in hiveStore gespeichert
++                      // sodass der Benutzer im eingeloggten Zustand befindet
++                      await hiveStore.openSession(
++                        UserAccessData(
++                          email: loginResponse['user']['email'],
++                          userName: loginResponse['user']['username'],
++                          bio: loginResponse['user']['bio'],
++                          image: loginResponse['user']['image'],
++                          token: loginResponse['user']['token'],
++                          ),
++                      );
++
++                      // Nach erfolgreichem Login erfolgt die Weiterleitung zur Startseite
++                      Navigator.pushNamedAndRemoveUntil(context, BaseScreen.baseUrl, (route) => false);
++                      } else {
++
++                        // Und falls der Login fehlschlägt, wird eine Fehlermeldung angezeigt
++                        CToast.instance.showError(context, 'Login nach Registrierung fehlgeschlagen.');
++                        }
++                      } catch (e) {
++
++                        // Bei einem technischen Fehler wird ebenfalls eine Fehlermeldung angezeigt
++                        CToast.instance.showError(context, 'Fehler beim Login: ${e.toString()}');
++                      }
++                    });
++  
++              //-----------------------------------------------
++    
++
++                    
++
+                 // Navigator.popUntil(context, (route) => route.isFirst);
+                 // Navigator.pushReplacement(context,
+                 //     CupertinoPageRoute(builder: (context) => LoginScreen()));
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/pubspec.yaml M3_abgabe/repo/apps/flutter/pubspec.yaml
+--- a/apps/flutter/pubspec.yaml	2025-05-19 15:15:58.000000000 +0200
++++ b/apps/flutter/pubspec.yaml	2025-06-13 19:03:09.000000000 +0200
+@@ -70,6 +70,9 @@
+   flutter_native_splash: 2.3.2
+ 
+   flutter_lints: ^1.0.0
++  # registrierung test
++  mocktail: ^1.0.0 # Wird für das Erstellen von Mock-Objekten und das Testen von Blocs verwendet
++
+   # The "flutter_lints" package below contains a set of recommended lints to
+   # encourage good coding practices. The lint set provided by the package is
+   # activated in the `analysis_options.yaml` file located at the root of your
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/test/test_registration.dart M3_abgabe/repo/apps/flutter/test/test_registration.dart
+--- a/apps/flutter/test/test_registration.dart	2025-05-19 15:15:58.000000000 +0200
++++ b/apps/flutter/test/test_registration.dart	2025-06-13 19:03:09.000000000 +0200
+@@ -1,11 +1,230 @@
+-import 'package:flutter/widgets.dart';
++// --registrierung test--------------------------------------------------------------
++// Dieser Widget-Test überprüft die korrekte Funktionsweise des Registrierungsprozesses.
++//
++// Ablauf des Tests:
++// 1. Die Registrierungsseite wird aufgebaut und gerendert.
++// 2. Der Benutzer füllt Schritt 1 des Formulars aus (Benutzername und E-Mail).
++// 3. Nach Klick auf „Next“ wird Schritt 2 angezeigt (Passwortfeld).
++// 4. Der Benutzer gibt ein Passwort ein und klickt auf „Sign Up“.
++// 5. Anschließend wird der Ladezustand simuliert (RegisterLoadingState).
++// 6. Danach wird der erfolgreiche Abschluss der Registrierung simuliert (RegisterDoneState).
++// 7. Der Test prüft, ob die App anschließend korrekt zur Startseite („Home Screen“) navigiert.
++//
++// Der Test verwendet einen speziell angepassten Bloc (TestRegisterBloc),
++// bei dem Zustände manuell durch `emitState()` gesetzt werden.
++// Dadurch kann das Verhalten des echten Blocs exakt nachgebildet und kontrolliert getestet werden.
++//
++// Es handelt sich um einen rein logischen Widget-Test ohne visuelle Oberfläche.
++// ----------------------------------------------------------------------------
++
++import 'dart:async';
++import 'package:conduit/model/user_model.dart';
++import 'package:flutter/material.dart';
+ import 'package:flutter_test/flutter_test.dart';
+-import 'package:conduit/main.dart';
++import 'package:flutter_bloc/flutter_bloc.dart';
++import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
++import 'package:mocktail/mocktail.dart';
++
++import 'package:conduit/bloc/register_bloc/register_bloc.dart';
++import 'package:conduit/bloc/register_bloc/register_event.dart';
++import 'package:conduit/bloc/register_bloc/register_state.dart';
++import 'package:conduit/model/auth_model.dart';
++import 'package:conduit/repository/auth_repo.dart';
++import 'package:conduit/ui/register/register_screen.dart';
++import 'package:hive_flutter/hive_flutter.dart';
++
++
++//---------------------------------------------
++// Hilfsmethode zum Scrollen & Tippen eines Buttons
++//---------------------------------------------
++Future<void> scrollToAndTap(WidgetTester tester, Finder finder) async {
++  // Scrollt automatisch zum Ziel-Widget, falls es außerhalb des sichtbaren Bereichs liegt
++  await tester.ensureVisible(finder);
++  // Wartet, bis alle Animationen und Übergänge vollständig abgeschlossen sind
++  await tester.pumpAndSettle();
++  // Führt einen simulierten „Tap“ (Klick) auf das Ziel-Widget aus
++  await tester.tap(finder);
++  // Wartet erneut, um sicherzustellen, dass UI-Reaktionen wie Navigation oder Ladeanzeigen abgeschlossen sind
++  await tester.pumpAndSettle();
++}
++
++//---------------------------------------------
++// Mock-Klassen für Bloc & Models zur Verwendung im Test
++//---------------------------------------------
++// Fake-Klasse für den RegisterBloc, um das echte Bloc-Verhalten im Test zu ersetzen
++class FakeRegisterBloc extends Fake implements RegisterBloc {}
++
++// Fake-Klasse für das AuthModel, notwendig zur Registrierung bei mocktail
++class FakeAuthModel extends Fake implements AuthModel {}
++
++// Fake-Klasse für RegisterEvent, damit mocktail Events korrekt verarbeiten kann
++class FakeRegisterEvent extends Fake implements RegisterEvent {}
++
++// Fake-Klasse für RegisterState, um Zustände in Tests simulieren zu können
++class FakeRegisterState extends Fake implements RegisterState {}
++
++// Diese Klasse ersetzt das echte AuthRepo im Testkontext, Sie wird benötigt, um den RegisterBloc zu initialisieren,
++// ohne dabei echte Netzwerk- oder Datenbankzugriffe durchzuführen
++class DummyAuthRepo extends Fake implements AuthRepo {
++  
++  // Die Methode login() simuliert eine erfolgreiche Authentifizierung, indem sie eine vorgefertigte Benutzer-Antwort zurückgibt
++  // Dies ermöglicht die Weiterverarbeitung im Bloc und im UI, ohne dass ein echter Server benötigt wird
++  @override
++  Future<Map<String, dynamic>> login(AuthModel model) async {
++    return {
++      'user': {
++        'email': model.email,
++        'username': model.username ?? 'testuser',
++        'bio': model.bio ?? '',
++        'image': '',
++        'token': 'dummy_token_123',
++      }
++    };
++  }
++}
++
++//---------------------------------------------
++// Test-Bloc mit StreamController zur manuellen Zustandssteuerung
++//---------------------------------------------
++class TestRegisterBloc extends RegisterBloc {
++  // Eigener StreamController zum gezielten Senden von Zuständen im Test
++  final StreamController<RegisterState> _controller =
++      StreamController.broadcast();
++  // Konstruktor ruft den echten RegisterBloc mit einem Dummy-Repo auf
++  TestRegisterBloc() : super(repo: DummyAuthRepo());
++  @override
++  // Überschreibt den Stream des Blocs mit dem eigenen kontrollierbaren Stream
++  Stream<RegisterState> get stream => _controller.stream;
++  // Methode zum gezielten Auslösen eines RegisterState im Testablauf
++  void emitState(RegisterState state) => _controller.add(state);
++  @override
++  // Schließt den StreamController sauber nach Testende
++  Future<void> close() {
++    _controller.close();
++    return super.close();
++  }
++}
+ 
+ void main() {
+-  testWidgets('Test Registration', (WidgetTester tester) async {
+-    await tester.pumpWidget(MyApp());
+-    // will fail
+-    expect(1,2);
++  late TestRegisterBloc registerBloc;
++
++  //---------------------------------------------
++  // SetUp: Ein frischer Test-Bloc wird vor jedem Test initialisiert
++  //---------------------------------------------
++  setUp(() {
++    registerBloc = TestRegisterBloc();
++  });
++
++  //---------------------------------------------
++  // SetUpAll: Registrierung von Fallback-Werten für mocktail
++  //---------------------------------------------
++  setUpAll(() {
++    // Registriert ein Platzhalterobjekt für AuthModel, damit mocktail es intern verwenden kann
++    registerFallbackValue(FakeAuthModel());
++
++    // Registriert ein Platzhalterobjekt für RegisterEvent zur Verwendung bei Event-Matching
++    registerFallbackValue(FakeRegisterEvent());
++
++    // Registriert ein Platzhalterobjekt für RegisterState für erwartete/stubbare Zustände
++    registerFallbackValue(FakeRegisterState());
++
++    // Registriert das Dummy-Repository, um Konstruktorabhängigkeiten im Bloc zu erfüllen
++    registerFallbackValue(DummyAuthRepo());
++  });
++
++  //---------------------------------------------
++  // App-Aufbau: MaterialApp mit SmartDialog & Navigation
++  //---------------------------------------------
++  Widget createWidgetUnderTest() {
++    return MaterialApp(
++      // Initialisiert SmartDialog (z. B. für Ladeanzeigen und Toasts)
++      builder: FlutterSmartDialog.init(),
++
++      // Bindet den SmartDialog-Observer in den Navigator ein
++      navigatorObservers: [FlutterSmartDialog.observer],
++
++      onGenerateRoute: (settings) {
++        // Definiert eine Test-Route für "/base", die in der App nach erfolgreicher Registrierung angesteuert wird
++        if (settings.name == '/base') {
++          return MaterialPageRoute(
++            builder: (context) => const Scaffold(
++              body:
++                  Center(child: Text('Home Screen')), // Platzhalter-Startseite
++            ),
++          );
++        }
++        return null;
++      },
++
++      // Legt die RegisterScreen als Start-Widget des Tests fest und injiziert den RegisterBloc
++      home: BlocProvider<RegisterBloc>.value(
++        value: registerBloc,
++        child: RegisterScreen(screenSize: const Size(400, 800)),
++      ),
++    );
++  }
++
++  //---------------------------------------------
++  // Haupttest: Simulierte erfolgreiche Registrierung
++  //---------------------------------------------
++  testWidgets('should register and show success message',
++      (WidgetTester tester) async {
++
++    // Initialisiert Hive-Datenbank (erforderlich für persistente Speicherung in Flutter-Umgebung)
++    await Hive.initFlutter();
++    
++    // Registriert den TypeAdapter für UserAccessData (Pflicht, damit Hive komplexe Objekte speichern kann)
++    // Die ID 0 ist die eindeutige Typ-ID für UserAccessData
++    if (!Hive.isAdapterRegistered(0)) {
++      Hive.registerAdapter(UserAccessDataAdapter());
++    }
++
++    // Öffnet die Hive-Box für Benutzerinformationen, was für Registrierung bzw Login-Speicherung wichtig ist
++    await Hive.openBox<UserAccessData>('user');   
++    await Hive.openBox('token'); // Öffnet die Hive-Box für das Token, und wird nach Login benötigt, um Nutzer-Session zu speichern
++
++
++    // Widget laden und initial rendern lassen
++    await tester.pumpWidget(createWidgetUnderTest());
++    await tester.pumpAndSettle();
++
++    //---------------------------------------------
++    // Schritt 1: Username und E-Mail ausfüllen
++    //---------------------------------------------
++    await tester.enterText(find.byType(TextFormField).at(0), 'testuser');
++    await tester.enterText(find.byType(TextFormField).at(1), 'test@test.com');
++
++    // Weiter zur nächsten Eingabeseite (Schritt 2)
++    await scrollToAndTap(tester, find.text('Next'));
++
++    //---------------------------------------------
++    // Schritt 2: Passwort eingeben und Registrierung abschicken
++    //---------------------------------------------
++    await tester.enterText(find.byType(TextFormField).last, '123456');
++    await scrollToAndTap(tester, find.text('Sign Up'));
++
++    //---------------------------------------------
++    // Schritt 3: Ladezustand simulieren
++    //---------------------------------------------
++    registerBloc.emitState(RegisterLoadingState(
++      authModel: AuthModel(
++        username: 'testuser',
++        email: 'test@test.com',
++        password: '123456',
++      ),
++    ));
++    await tester.pump();
++
++    //---------------------------------------------
++    // Schritt 4: Erfolgreiche Registrierung simulieren
++    //---------------------------------------------
++    registerBloc.emitState(RegisterDoneState(msg: 'User Created successfully'));
++    await tester.pumpAndSettle();
++
++    //---------------------------------------------
++    // Schritt 5: Überprüfen, ob zur Startseite navigiert wurde
++    //---------------------------------------------
++    expect(find.text('Home Screen'), findsOneWidget);
++
+   });
+-}
+\ No newline at end of file
++}
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/src/api/index.ts M3_abgabe/repo/apps/vue3/src/api/index.ts
+--- a/apps/vue3/src/api/index.ts	2025-05-19 15:15:58.000000000 +0200
++++ b/apps/vue3/src/api/index.ts	2025-06-13 19:03:09.000000000 +0200
+@@ -149,6 +149,17 @@
+   })
+ }
+ 
++// Die neue Funktion `changePassword` wurde hinzugefügt, damit ein Benutzer sein Passwort unabhängig von den restlichen Profildaten ändern kann
++// sie sendet die aktuellen und neuen Passwörter an den neuen API-Endpunkt /api/user/password
++function changePassword(params: { currentPassword: string; newPassword: string }): Promise<{ message: string }> {
++  return request({
++    url: '/api/user/password', // neue Backend-Endpunkt für Passwortänderung
++    method: 'put', // Die HTTP-Methode PUT wird genutzt, um das bestehende Passwort zu aktualisieren
++    data: params, // Die aktuellen und neuen Passwörter werden als Nutzdaten mitgesendet
++  })
++}
++
++
+ export default {
+   getArticles,
+   getTags,
+@@ -167,4 +178,6 @@
+   updateUser,
+   getPofile,
+   doSearch,
++  changePassword,   // Diese Funktion wird exportiert, damit sie in Vue-Komponenten aufgerufen werden kann
++
+ }
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/src/pages/index/index.vue M3_abgabe/repo/apps/vue3/src/pages/index/index.vue
+--- a/apps/vue3/src/pages/index/index.vue	2025-05-19 15:15:58.000000000 +0200
++++ b/apps/vue3/src/pages/index/index.vue	2025-06-13 19:03:09.000000000 +0200
+@@ -1,10 +1,21 @@
++<!-- Das ursprüngliche Problem war, dass Tags und Artikel nicht zuverlässig angezeigt wurden, da sie nicht synchron oder in falscher Reihenfolge geladen wurden
++Die Lösung besteht darin, die Tags beim Laden der Seite separat per API abzurufen und erst nach erfolgreichem Laden (durch tagsLoaded) die Artikel anzufordern
++Dadurch werden sowohl Tags als auch Artikel stabil und vollständig geladen -->
++
+ <script lang="ts" setup>
+ import PopularTags from './components/PopularTags.vue'
+ import SearchField from '@/pages/index/components/SearchField.vue'
+ import { useUserStore } from '@/stores/useUserStore'
++import api from '@/api' // Hier wurde die API importiert, um direkt auf die getTags()-Funktion zugreifen
+ import type { ArticleListProps, ArticleToggleOptions } from '@/types'
+ 
+ const store = useUserStore()
++
++const tags = ref<string[]>([]) // Hier wird ein lokaler Zustand für die Tags eingeführt, damit sie separat geladen und angezeigt werden können
++const { getTags } = api // Hier wird die getTags-Funktion aus der API extrahiert
++const tagsLoaded = ref(false) // Mit dieser Variable wird gespeichert, ob die Tags erfolgreich geladen wurden
++const error = ref(false) // Diese Variable zeigt an, ob beim Laden der Tags ein Fehler aufgetreten ist
++
+ const getOptionsForLabel: Record<string, { author?: string; tag?: string; query?: string }> = {
+   'Global Feed': {},
+   'Your Feed': { author: store.userInfo?.username }
+@@ -18,6 +29,36 @@
+   },
+   { label: 'Global Feed' },
+ ])
++
++// Anzeigeproblem-Vue
++//--------------------------------------------------------------------------------------------
++
++// In dieser Funktion werden die Tags beim Laden der Seite von der API geholt
++
++// Sobald die Komponente vollständig geladen ist, wird diese Funktion automatisch aufgerufen
++onMounted(async () => {
++  try {
++    // Hier wird ein API-Aufruf durchgeführt, um alle verfügbaren Tags vom Server abzurufen
++    const { tags: fetchedTags } = await getTags()
++
++    // Die abgerufenen Tags werden in der lokalen Variable tags gespeichert, 
++    // damit sie im Template angezeigt werden können
++    tags.value = fetchedTags
++
++    // Nachdem die Tags erfolgreich geladen wurden, wird tagsLoaded auf true gesetzt,
++    // damit die Artikel im Template dargestellt werden
++    tagsLoaded.value = true
++
++  } catch (e) {
++
++    // Falls beim Laden der Tags ein Fehler auftritt, wird error auf true gesetzt,
++    // sodass eine Fehlermeldung angezeigt wird
++    error.value = true
++  }
++})
++
++//--------------------------------------------------------------------------------------------
++
+ function handleTabClick() {
+   if (['Your Feed', 'Global Feed'].includes(activeLabel.value)) {
+     if (articleToggleOptions.value.length === 3) {
+@@ -76,7 +117,13 @@
+       <div class="row">
+         <div class="col-md-9">
+           <article-toggle v-model="activeLabel" :options="articleToggleOptions" @change="handleTabClick" />
+-          <article-list :remote-params="articleListProps" />
++
++          <!-- Hier wurde die Anzeige der Artikel so geändert, dass sie erst gerendert werden, wenn die Tags geladen wurden -->
++          <article-list v-if="tagsLoaded" :remote-params="articleListProps" />
++
++          <!-- Diese Ladeanzeige wird angezeigt, solange die Tags noch nicht fertig geladen sind -->
++          <div v-else class="article-preview">Loading articles...</div>
++        
+         </div>
+ 
+         <div class="col-md-3">
+@@ -85,7 +132,9 @@
+               <br><br><br>
+           </div>
+           <div>
+-            <PopularTags @change="handleTagClick" />
++
++            <!-- Die Tag-Komponente wurde so angepasst, dass die geladenen Tags aus dem neuen Zustand übergeben werden -->
++            <PopularTags :options="tags" @change="handleTagClick" />
+           </div>
+         </div>
+       </div>
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/src/pages/settings/index.vue M3_abgabe/repo/apps/vue3/src/pages/settings/index.vue
+--- a/apps/vue3/src/pages/settings/index.vue	2025-05-19 15:15:58.000000000 +0200
++++ b/apps/vue3/src/pages/settings/index.vue	2025-06-13 19:03:09.000000000 +0200
+@@ -11,7 +11,8 @@
+   username: '',
+   bio: '',
+   email: '',
+-  password: '',
++// password: '', // das Feld `password` wird aus dem Objekt `fromStore` entfernt, weil die Passwortänderung nun in einer separaten Komponente (`/settings/password`) erfolgt
++
+ })
+ const { isLoading, execute: onSubmit } = useAsyncState(
+   async () => {
+@@ -64,18 +65,19 @@
+               <fieldset class="form-group">
+                 <input v-model="fromStore.email" type="text" placeholder="Email" class="form-control form-control-lg">
+               </fieldset>
+-              <fieldset class="form-group">
+-                <input
+-                  v-model="fromStore.password" type="password" placeholder="New Password"
+-                  class="form-control form-control-lg"
+-                >
+-              </fieldset>
+               <button class="btn btn-lg btn-primary pull-xs-right" :disabled="isLoading">
+                 Update Settings
+               </button>
+             </fieldset>
+           </form>
+-          <hr>
++          <hr />
++
++          <!-- Neuer Button für die Passwortänderung (führt zu separater Passwortseite) -->
++          <RouterLink to="/settings/password" class="btn btn-outline-warning w-100 mt-2">
++            Passwort ändern
++          </RouterLink>
++
++          <hr />
+           <button class="btn btn-outline-danger" @click="onLogout">
+             Or click here to logout.
+           </button>
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/src/pages/settings/password.vue M3_abgabe/repo/apps/vue3/src/pages/settings/password.vue
+--- a/apps/vue3/src/pages/settings/password.vue	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/vue3/src/pages/settings/password.vue	2025-06-13 19:03:09.000000000 +0200
+@@ -0,0 +1,117 @@
++<!--
++  Diese Komponente stellt die Seite zur Änderung des Benutzerpassworts bereit
++  Sie wird von eingeloggten Nutzern verwendet, um ihr Passwort zu aktualisieren
++  Es werden zwei Felder benötigt: das aktuelle Passwort und das neue
++  Die Eingaben werden an das Backend geschickt, mit Ladeanzeige, Erfolgsmeldung und Fehlerbehandlung.
++-->
++
++<script lang="ts" setup>
++
++import { ref } from 'vue' // Die Funktion `ref` wird importiert, um reaktive Variablen zu erstellen
++import api from '@/api' // Die zentrale API-Schnittstelle wird importiert
++import { useRouter } from 'vue-router' // Die Routerfunktion wird importiert, um Seitenübergänge durchzuführen
++
++const router = useRouter() // Diese Instanz wird verwendet, um nach erfolgreicher Änderung zur Einstellungsseite zurückzuleiten
++
++const currentPassword = ref('') // In dieser Variable wird das aktuell eingegebene Passwort gespeichert
++const newPassword = ref('') // In dieser Variable wird das neue gewünschte Passwort gespeichert
++const isLoading = ref(false) // Diese Variable zeigt an, ob die Anfrage zur Passwortänderung aktuell verarbeitet wird
++const errorMessage = ref('') // Diese Variable speichert eine eventuell auftretende Fehlermeldung
++const successMessage = ref('') // Diese Variable speichert eine Erfolgsmeldung nach erfolgreicher Passwortänderung
++
++
++// Diese Funktion wird aufgerufen, wenn der Benutzer das Formular absendet
++const onChangePassword = async () => {
++  if (!currentPassword.value || !newPassword.value) { // Hier wird es geprüft, ob beide Passwortfelder ausgefüllt sind
++    errorMessage.value = 'Bitte beide Passwörter eingeben.' // Wenn nicht, wird eine Fehlermeldung angezeigt
++    return
++  }
++
++  isLoading.value = true // Die Ladeanzeige wird aktiviert
++
++  // Alte Fehlermeldungen und Erfolgsmeldungen werden zurückgesetzt
++  errorMessage.value = ''
++  successMessage.value = ''
++
++  try {
++    // Die Passwortdaten werden an das Backend gesendet
++    await api.changePassword({
++      currentPassword: currentPassword.value,
++      newPassword: newPassword.value,
++    })
++
++    
++    successMessage.value = 'Passwort erfolgreich geändert!' // Bei Erfolg wird eine Bestätigung angezeigt
++
++    // Das aktuelle und neue Passwortfeld werden geleert
++    currentPassword.value = ''
++    newPassword.value = ''
++
++    setTimeout(() => router.push('/settings'), 1500) // Nach kurzer Wartezeit wird zur Einstellungsseite weitergeleitet
++  
++  // Falls ein Fehler vom Backend zurückkommt, wird eine entsprechende Meldung angezeigt
++  } catch (e: any) {
++    errorMessage.value = e?.response?.data?.message || 'Fehler beim Ändern des Passworts.'
++ 
++ 
++ 
++  } finally {
++    isLoading.value = false // Unabhängig vom Ergebnis wird die Ladeanzeige wieder deaktiviert
++  }
++}
++</script>
++
++
++<template>
++  <div class="settings-page">
++    <div class="container page">
++      <div class="row">
++        <div class="col-md-6 offset-md-3 col-xs-12">
++          <h1 class="text-xs-center">Passwort ändern</h1>
++
++          <!-- Hier wird eine Fehlermeldung angezeigt, wenn beim Speichern ein Fehler auftritt -->
++          <div v-if="errorMessage" class="alert alert-danger">{{ errorMessage }}</div>
++
++          <!-- Hier wird eine Erfolgsmeldung angezeigt, nachdem das Passwort erfolgreich geändert wurde -->
++          <div v-if="successMessage" class="alert alert-success">{{ successMessage }}</div>
++
++          <!-- Hier wird ein Formular angezeigt, mit dem der Nutzer ein neues Passwort eingeben kann -->
++          <form @submit.prevent="onChangePassword">
++            
++            <!-- das ist das Eingabefeld für das aktuelle Passwort -->
++            <fieldset class="form-group">
++
++              <!-- Der eingegebene Wert wird in `currentPassword` gespeichert -->
++              <input
++                v-model="currentPassword"
++                type="password"
++                class="form-control form-control-lg"
++                placeholder="Aktuelles Passwort"
++                required
++              />
++            </fieldset>
++
++            <!-- das ist das Eingabefeld für das neue Passwort -->
++            <fieldset class="form-group">
++
++              <!-- Der eingegebene Wert wird in `newPassword` gespeichert -->
++              <input
++                v-model="newPassword"
++                type="password"
++                class="form-control form-control-lg"
++                placeholder="Neues Passwort"
++                required
++              />
++            </fieldset>
++            
++            <!-- Sobald der Nutzer den Button klickt, wird das neue Passwort + alte Passwort an das Backend gesendet
++            und während die Anfrage läuft, wird der Button deaktiviert, um Doppelanfragen zu verhindern -->
++            <button class="btn btn-lg btn-warning pull-xs-right" :disabled="isLoading">
++              Passwort ändern
++            </button>
++          </form>
++        </div>
++      </div>
++    </div>
++  </div>
++</template>
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/tests/end2end.cy.ts M3_abgabe/repo/apps/vue3/tests/end2end.cy.ts
+--- a/apps/vue3/tests/end2end.cy.ts	2025-05-19 15:15:58.000000000 +0200
++++ b/apps/vue3/tests/end2end.cy.ts	2025-06-13 19:03:09.000000000 +0200
+@@ -1,5 +1,136 @@
+-describe('template spec', () => {
+-    it('dummy test', () => {
+-        cy.wrap(4).should('be.above', 10)
+-    })
+-})
+\ No newline at end of file
++// Diese Test prüft, ob das Ändern von Passwort und Profildaten wie erwartet funktioniert
++
++describe('E2E Tests: Nutzerprofil und Passwortänderung', () => {
++  // Hier werden die Testdaten für E-Mail, altes Passwort, neues Passwort und neue Bio definiert.
++  const testEmail = 'testuser@example.com';
++  const testPassword = 'Start1234!';
++  const newPassword = 'Neu1234!';
++  const newBio = 'Updated Bio Text';
++
++  // In ersten Test wird ausschließlich das Passwort geändert, während die restlichen Profildaten gleich bleiben
++  it('ändert nur das Passwort, ohne Nutzerdaten zu verändern', () => {
++    
++    // Zuerst wird die Login-Seite geöffnet
++    cy.visit('/login');
++
++    // Dann werden die Login-Felder mit der E-Mail und dem ursprünglichen Passwort befüllt
++    cy.get('input[placeholder="Email"]').type(testEmail);
++    cy.get('input[placeholder="Password"]').type(testPassword);
++
++    // Anschließend wird der Login-Button gedrückt
++    cy.get('button[type="submit"]').click();
++    
++    cy.url().should('include', '/'); // Hier wird es geprüft, ob die Startseite nach dem Login erfolgreich geladen wurde
++    
++    cy.visit('/settings/password'); // Danach wird zur Passwort-Ändern-Seite navigiert
++    
++    // Dort wird das aktuelle Passwort sowie das neue Passwort eingegeben
++    cy.get('input[placeholder="Aktuelles Passwort"]').type(testPassword);
++    cy.get('input[placeholder="Neues Passwort"]').type(newPassword);
++    
++    cy.get('button').contains('Passwort ändern').click(); // und der Button zum Ändern des Passworts wird geklickt
++
++    // Es wird überprüft, ob eine Erfolgsmeldung angezeigt wird
++    cy.get('.alert-success').should('contain', 'Passwort erfolgreich geändert!');
++
++    // Danach wird der Benutzer ausgeloggt
++    cy.contains('logout', { matchCase: false }).click();
++
++    // Hier erfolgt es ein erneuter Login, aber diesmal mit dem neuen Passwort
++    cy.visit('/login');
++    cy.get('input[placeholder="Email"]').type(testEmail);
++    cy.get('input[placeholder="Password"]').type(newPassword);
++    cy.get('button[type="submit"]').click();
++    cy.url().should('include', '/');
++
++    cy.visit('/settings'); // dann wird die Profilseite geöffnet
++    cy.get('input[placeholder="Email"]').should('have.value', testEmail); // Es wird geprüft, ob die E-Mail gleich geblieben ist
++    cy.get('textarea[placeholder*="bio"]').should('have.value', ''); // auch wird überprüft, dass das Bio-Feld leer ist, weil am anfang leer war
++  });
++
++  // In diesem zweiten Test wird ausschließlich die Bio aktualisiert, das Passwort bleibt gleich
++  it('ändert nur die Accountdaten, ohne Passwort zu verändern', () => {
++    
++    // Es wird mit dem neuen Passwort aus dem vorherigen Test eingeloggt
++    cy.visit('/login');
++    cy.get('input[placeholder="Email"]').type(testEmail);
++    cy.get('input[placeholder="Password"]').type(newPassword);
++    cy.get('button[type="submit"]').click();
++    
++    // Nach dem erfolgreichen Login wird zur Einstellungsseite navigiert
++    cy.url().should('include', '/');
++    cy.visit('/settings');
++
++
++    cy.get('textarea[placeholder*="bio"]').clear().type(newBio); // Das Bio-Feld wird gelöscht und mit neuem Text gefüllt
++    cy.get('button').contains('Update Settings').click(); // Dann wird der Button zum Aktualisieren der Einstellungen geklickt
++    
++    // Nach erfolgreichem Speichern wird geprüft, ob die Bio im Profil korrekt angezeigt wird
++    cy.url().should('include', '/profile/');
++    cy.contains(newBio).should('exist');
++
++    // Danach erfolgt ein Logout über die Einstellungen-Seite
++    cy.visit('/settings');
++    cy.contains('logout', { matchCase: false }).click();
++
++    // Es folgt ein erneuter Login mit unveränderten Passwort
++    cy.visit('/login');
++    cy.get('input[placeholder="Email"]').type(testEmail);
++    cy.get('input[placeholder="Password"]').type(newPassword);
++    cy.get('button[type="submit"]').click();
++    cy.url().should('include', '/');
++
++    // Anschließend wird überprüft, ob die Bio korrekt gespeichert wurde
++    cy.visit('/settings');
++    cy.get('textarea[placeholder*="bio"]').should('have.value', newBio);
++
++    // Am ende werden Passwort und Bio wieder zurückgesetzt, diesmal direkt über API-Anfragen
++    cy.request({
++    method: 'POST',
++    url: 'http://localhost:8081/api/users/login',
++    body: {
++      user: {
++        email: testEmail,
++        password: newPassword
++     }
++    }
++  }).then((res) => {
++
++    // Sobald der Login erfolgreich war, wird das Authentifizierungstoken extrahiert
++    if (res.status === 200) {
++      const token = res.body.user.token;
++
++      // Die aktuellen Accountdaten werden ebenfalls zwischengespeichert
++      const userData = {
++        username: res.body.user.username,
++        email: res.body.user.email,
++        image: res.body.user.image
++    };
++
++      // Zuerst wird das Passwort wieder zurück auf das ursprüngliche gesetzt
++      cy.request({
++        method: 'PUT',
++        url: 'http://localhost:8081/api/user/password',
++        headers: { Authorization: `Token ${token}` },
++        body: {
++          currentPassword: newPassword,
++          newPassword: testPassword
++        }
++      });
++
++      // Danach wird die Bio wieder auf leer gesetzt
++      cy.request({
++        method: 'PUT',
++        url: 'http://localhost:8081/api/user',
++        headers: { Authorization: `Token ${token}` },
++        body: {
++          user: {
++            ...userData,
++            bio: ''
++            }
++          }
++        });
++      }
++    });
++  });
++});
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/tests/EndpointTest.md M3_abgabe/repo/tests/EndpointTest.md
+--- a/tests/EndpointTest.md	2025-05-19 15:15:58.000000000 +0200
++++ b/tests/EndpointTest.md	2025-06-13 19:03:09.000000000 +0200
+@@ -0,0 +1,36 @@
++- Testdokumentation: Passwortänderung über Swagger UI
++
++
++- Änderungen: Am anfang war die Passwortänderung im System über die Route `PUT /api/user`, dabei kann ein Benutzer sein Passwort ändern, ohne das aktuelle Passwort anzugeben, Um dieses Problem zu beheben, wurde das Passwortfeld aus dem Datentransferobjekt `UpdatedUserDto` entfernt, Stattdessen wurde ein neuer Endpunkt eingeführt: `PUT /api/user/password`
++
++
++- Getesteter Endpunkt : In diesem Test wurde der Endpunkt `PUT /api/user/password` überprüft. Dieser Endpunkt erwartet sowohl das aktuelle als auch das neue Passwort und prüft, ob das alte korrekt ist, und nur wenn das aktuelle Passwort stimmt, wird die Änderung durchgeführt
++
++- Authentifizierung: Weil es sich um einen geschützten Endpunkt handelt, ist ein gültiger JWT-Token erforderlich
++
++- Testschritte in Swagger UI: Zuerst habe ich die Swagger UI unter der URL `http://localhost:8081/api/swagger` im Browser geöffnet, und Um den Endpunkt aufzurufen, habe ich mich zunächst über den Login-Endpunkt `/api/users/login` authentifiziert und den erhaltenen JWT-Token kopiert, dann habe ich in der Swagger-Oberfläche auf den `Authorize`-Button geklickt und dort den Token eingetragen, danach habe ich den Endpunkt `PUT /user/password` geöffnet und Im Eingabefeld habe ich folgende Daten eingegeben:
++
++{
++  "currentPassword": "kiwi",
++  "newPassword": "kiwi12"
++}
++
++und auf Execute geklickt
++
++- Erwartetes Verhalten: Wenn sowohl das aktuelle Passwort korrekt angegeben wurde als auch der übermittelte JWT-Token gültig war, sollte der Server die Anfrage erfolgreich verarbeiten, in diesem Fall wird diese Antwort mit zurückgegeben:
++
++{
++  "message": "Password changed successfully"
++}
++
++
++
++was bestätigt, dass die Passwortänderung erfolgreich durchgeführt wurde
++
++- Weitere Testszenarien:
++
++Neben dem erfolgreichen Testfall wurden folgende Szenarien als Fehlerfälle identifiziert:
++
++1- Wenn ein falsches aktuelles Passwort eingegeben wird, sollte der Server mit dem Statuscode "400 Bad Request" antworten und die Änderung verweigern
++2- Wenn der JWT-Token fehlt oder ungültig ist, sollte der Server mit 401 Unauthorized antworten
++3- Wenn kein currentPassword mitgeschickt wird, also nur das neue Passwort übermittelt wird, sollte ebenfalls ein Fehler mit 400 Bad Request zurückgegeben werden
+\ No newline at end of file

@@ -1,0 +1,37 @@
+@startuml
+package "Tags" {
+
+  interface ITagsHandler {
+    +GetTagsAsync(cancellationToken: CancellationToken): Task<string[]>
+  }
+
+  class TagsHandler {
+    -_repository: IConduitRepository
+    +GetTagsAsync(cancellationToken: CancellationToken): Task<string[]>
+  }
+
+  class TagsModule {
+    +AddRoutes(app: IEndpointRouteBuilder): void
+  }
+
+  class TagsEnvelope<T> {
+    +tags: T
+  }
+
+  ITagsHandler <|.. TagsHandler
+  TagsModule --> ITagsHandler : uses
+  TagsModule --> TagsEnvelope
+}
+@enduml
+
+
+
+/' 
+
+Das Diagramm zeigt die Struktur der Tags-Komponente im Backend, sie ist für das Abrufen der verfügbaren Tags im System zuständig
+Im Zentrum steht die Klasse TagsHandler, die die Methode GetTagsAsync() enthält, die alle Tags aus der Datenbank abfragt
+Die Klasse implementiert das Interface ITagsHandler, das die Methode festlegt, die von außen verwendet werden kann
+Die Klasse TagsModule verbindet die API-Endpunkte wie  "/api/tags" mit dem System
+und nutzt das Interface ITagsHandler, um die Daten zu holen, und das TagsEnvelope, um die Liste der Tags in der Antwort zu verpacken
+
+'/

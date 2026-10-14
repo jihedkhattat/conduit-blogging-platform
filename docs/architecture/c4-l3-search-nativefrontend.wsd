@@ -1,0 +1,129 @@
+@startuml
+!include <C4/C4_Component>
+
+Person(user,"Conduit User","reads and writes articles as well as comments, add and edit user accounts")
+
+System_Boundary(conduit_block,"Conduit"){
+    Container_Boundary(conduit_frontend_native,"Conduit Native Frontend"){
+    /'
+        Flutter/Dart
+        Provides a system to show, edit, and remove blog articles, user accounts, and comments in an operating system.
+    '/
+        Component(main,"Main","Dart","Setup Application")
+        Component(bloc,"BLoC","Dart","State Management - **B**usiness **Lo**gic **C**omponent")
+        Component(config,"Config","Dart","configures paths, provide local storage,")
+        Component(model,"Model","Dart","transforms Conduit objects from/to JSON")
+        Component(navigator,"Navigator","Dart","Setup and manage routing")
+        Component(repository,"Repository","Dart","manage articles, authentication")
+        Component(services,"Services","Dart","user state management")
+        Component(ui,"UI","Dart","provides widgets for UI")
+        Component(utils,"Utils","Dart","messaging, screen transitioning, app colors, exception handling")
+        Component(widget,"Widget","Dart","defines several widgets")
+        Component(windows,"Windows Application","C++")
+        Component(linux,"Linux Application","C++")
+        Component(macos,"macOS Application","Swift")
+        Component(web,"Web Application","HTML/CSS/JavaScriot")
+        Component_Ext(flutter,"Flutter","Dart",$link="https://docs.flutter.dev/","Framework")
+        Component_Ext(http,"HTTP",$link="https://pub.dev/packages/http","Dart","future-based http client")
+        Component_Ext(hive,"Hive",$link="https://github.com/isar/hive","Dart","key-value-based database")
+
+        ' Komponenten zur Volltextsuche
+        Component(search_screen,"SearchScreen","Dart","Suchseite mit Eingabe, Anzeige und Paginierung")
+        Component(search_method,"searchArticles()","Dart","Methode in Repository für GET-Anfrage an /api/articles/search")
+    }
+
+    Container(conduit_backend_dot,"Conduit Backend","ASP.Net7.0/C#", "Creates, reads, updates, deletes (CRUD-operations) blog articles, user accounts, and comments.")
+}
+
+'Context Relation
+Rel(user,windows, "uses via operating system")
+Rel(user,linux, "uses via operating system")
+Rel(user,macos, "uses via operating system")
+Rel(user,ui, "uses via operating system")
+Rel(repository,conduit_backend_dot,"communicates frontend changes","HTTP/REST")
+Rel(http,conduit_backend_dot,"conducts HTTP requests","HTTP/REST")
+Rel(services,conduit_backend_dot,"communicates user authentication requests","HTTP/REST")
+'Container Relations
+
+Rel(flutter,main,"ensemble")
+Rel(flutter,windows,"ensemble")
+Rel(flutter,linux,"ensemble")
+Rel(flutter,macos,"ensemble")
+Rel(flutter,web,"ensemble")
+Rel(bloc,model,"uses representations")
+Rel(bloc,repository,"uses backend")
+Rel(bloc,config,"uses user session storage")
+Rel(bloc,http,"handles register state")
+Rel(main,bloc,"uses follow/like state")
+Rel(main,config,"uses storage")
+Rel(main,flutter,"uses")
+Rel(main,hive,"use storage for user")
+Rel(main,model,"uses user model")
+Rel(main,navigator,"init navigation/routing")
+Rel(main,repository,"linking backend layer")
+Rel(main,ui,"uses start screen")
+Rel(main,utils,"uses app colors")
+Rel(navigator,bloc,"assembles states")
+Rel(navigator,ui,"uses widgets")
+Rel(navigator,utils,"uses app colors/screen transition")
+Rel(navigator,flutter,"uses")
+Rel(navigator,main,"uses fonts")
+Rel(repository,config,"uses path constants")
+Rel(repository,http,"setup http requests")
+Rel(repository,model,"uses representations")
+Rel(repository,services,"uses user information")
+Rel(ui,bloc,"uses")
+Rel(ui,config,"uses")
+Rel(ui,flutter,"uses")
+Rel(ui,hive,"uses")
+Rel(ui,main,"uses fonts"),,
+Rel(ui,model,"uses")
+Rel(ui,navigator,"uses")
+Rel(ui,utils,"uses")
+Rel(ui,widget,"uses")
+Rel(utils,hive,"uses local storage")
+Rel(utils,flutter,"uses")
+Rel(utils,main,"uses fonts")
+Rel(utils,ui,"direction to screen")
+Rel(services,flutter,"uses")
+Rel(services,hive,"uses local storage")
+Rel(services,http,"setup user authentication requests")
+Rel(services,model,"uses representations")
+Rel(services,repository,"uses articles")
+Rel(services,utils,"uses messaging system, exception handling")
+Rel(widget,bloc,"uses state")
+Rel(widget,config,"uses storage")
+Rel(widget,flutter,"uses")
+Rel(widget,hive,"uses storage")
+Rel(widget,ui,"uses")
+Rel(widget,utils,"uses app colors")
+Rel(widget,main,"uses fonts")
+Rel(widget,model,"uses representations")
+
+'Beziehungen für Suche
+Rel(user, search_screen, "interagiert mit der Suchoberfläche", "z.B. Texteingabe und Navigation")
+Rel(search_screen, search_method, "ruft Methode searchArticles(query, offset, limit) auf", "zum Start der Suche")
+Rel(search_method, repository, "ist implementiert in AllArticlesImpl", "enthält die Suchlogik")
+Rel(search_method, http, "sendet HTTP-GET-Anfrage an /api/articles/search", "inkl. Query, Limit, Offset und Token")
+Rel(search_screen, ui, "verwendet UI-Komponenten", "wie ListView und ArticleWidgets zur Darstellung")
+Rel(search_screen, utils, "nutzt Hilfsmittel", "z.B. Farben, Ladeindikator, Fehlermeldungen")
+
+
+SHOW_FLOATING_LEGEND()
+@enduml
+
+
+
+
+
+
+
+
+/'
+
+Dieses Diagramm zeigt, wie die Volltextsuche in das Flutter-Frontend von Conduit integriert wurde. Die neue Seite SearchScreen ist die zentrale Komponente der Suche. Hier kann der Nutzer Begriffe eingeben 
+und erhält passende Artikel mit Paginierung. Die Suchanfrage wird über die Methode searchArticles() ausgelöst, die in der Klasse AllArticlesImpl im Repository definiert ist. Sie sendet eine HTTP-GET-Anfrage an den 
+Endpunkt /api/articles/search. Dabei werden Suchbegriff, Limit, Offset und ein Authentifizierungs-Token mitgesendet. Die Ergebnisse werden mit UI-Komponenten dargestellt, z.B einer ListView und Artikelvorschau-Widgets
+Unterstützende Funktionen wie Farbschema, Ladeanzeige oder Fehlermeldungen werden aus dem utils-Modul übernommen
+
+'/

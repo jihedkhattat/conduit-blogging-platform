@@ -1,0 +1,57 @@
+@startuml
+title Sequenzdiagramm: Nutzer-Login (Flutter → Backend) – Level 4
+
+actor User
+
+participant "Flutter: LoginScreen" as UI
+participant "Flutter: LoginBloc" as Bloc
+participant "Flutter: AuthRepository" as Repository
+participant "Flutter: AuthService" as Service
+participant "API Endpoint: POST /api/users/login" as HttpEndpoint
+participant "UserHandler.LoginAsync()" as Handler
+participant "IConduitRepository" as DBRepo
+participant "SQLite DB" as DB
+
+User -> UI : Gibt E-Mail & Passwort ein + klickt „Sign in“
+UI -> Bloc : add(LoginSubmitEvent(AuthModel))
+Bloc -> Repository : login(email, password)
+Repository -> Service : AuthService.login(email, password)
+Service -> HttpEndpoint : POST /api/users/login
+
+HttpEndpoint -> Handler : LoginAsync(LoginUserDto login)
+Handler -> DBRepo : GetUserByEmailAsync(login.Email)
+DBRepo -> DB : SELECT * FROM Users WHERE Email = ?
+DB --> DBRepo : User oder null
+DBRepo --> Handler : User
+
+alt Gültige Anmeldedaten
+    Handler -> Handler : Prüfe Passwort (user.Password == login.Password)
+    Handler -> Handler : Erzeuge Token
+    Handler --> HttpEndpoint : Rückgabe UserDto mit JWT
+    HttpEndpoint --> Service : 200 OK mit User + Token
+    Service --> Repository : Rückgabe UserDto
+    Repository --> Bloc : Rückgabe UserDto
+    Bloc --> UI : Zustand → LoginSuccess
+    UI -> User : Weiterleitung zur Startseite
+else Ungültige Daten
+    Handler --> HttpEndpoint : Fehler (ProblemDetailsException)
+    HttpEndpoint --> Service : 422 Unprocessable Entity
+    Service --> Repository : Fehlerobjekt
+    Repository --> Bloc : LoginErrorState
+    Bloc --> UI : Zeige Fehlermeldung
+end
+@enduml
+
+
+
+/'
+Dieses Sequenzdiagramm zeigt den Ablauf des Login-Prozesses in der Flutter-App vom Frontend bis zur Datenbank
+Ein Benutzer gibt seine E-Mail und sein Passwort in der LoginScreen ein und klickt auf "Sign in", daraufhin wird im LoginBloc das LoginSubmitEvent ausgelöst
+Der Bloc ruft über das AuthRepository die Methode login() auf
+Das Repository leitet die Daten weiter an den AuthService, welcher einen HTTP-POST-Request an /api/users/login sendet. Dieser Request enthält die Login-Daten
+Im Backend verarbeitet die Methode LoginAsync() im UserHandler diesen Request, sie ruft GetUserByEmailAsync() aus dem IConduitRepository auf, um den Benutzer aus der Datenbank abzurufen
+Wenn ein Benutzer gefunden wurde und das Passwort korrekt ist, wird ein JWT-Token erzeugt und mit dem UserDto zurückgegeben.
+Diese Daten fließen in umgekehrter Reihenfolge zurück bis zur Flutter-UI und dort erkennt der Bloc den Erfolg, wechselt in den Zustand LoginSuccess und die UI leitet den Benutzer auf die Startseite weiter
+Falls die Anmeldedaten ungültig sind, wird stattdessen eine Fehlermeldung (422) zurückgegeben. Diese durchläuft ebenfalls  Service, Repository und Bloc und wird schließlich als Fehlerstatus in der UI angezeigt
+
+'/

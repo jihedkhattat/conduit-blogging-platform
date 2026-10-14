@@ -1,0 +1,16 @@
+@startuml
+!include <C4/C4_Context>
+
+Person(user, "Benutzer", "Verfasst Artikel, liest Inhalte und verwaltet sein Profil")
+
+System(conduit, "Conduit Platform", "Artikelverwaltung und soziale Interaktion")
+
+Rel(user, conduit, "Nutzt über Browser oder App", "HTTPS")
+@enduml
+
+
+/' 
+  Dieses Diagramm zeigt, dass ein Benutzer die Conduit-Plattform nutzt, um Artikel zu verwalten und mit anderen zu interagieren
+  Der Zugriff erfolgt über Web oder App und die Verbindung läuft über HTTPS
+'/
+

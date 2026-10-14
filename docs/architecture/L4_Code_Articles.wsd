@@ -1,0 +1,101 @@
+@startuml
+package "Articles" {
+
+  interface IArticlesHandler {
+    +CreateArticleAsync(newArticle: NewArticleDto, username: string, cancellationToken): Task<Article>
+    +UpdateArticleAsync(update: ArticleUpdateDto, slug: string, username: string, cancellationToken): Task<Article>
+    +DeleteArticleAsync(slug: string, username: string, cancellationToken): Task
+    +GetArticlesAsync(query: ArticlesQuery, username: string, isFeed: bool, cancellationToken): Task<ArticlesResponseDto>
+    +GetArticleBySlugAsync(slug: string, username: string, cancellationToken): Task<Article>
+    +AddCommentAsync(slug: string, username: string, commentDto: CommentDto, cancellationToken): Task<Comment>
+    +RemoveCommentAsync(slug: string, commentId: int, username: string, cancellationToken): Task
+    +GetCommentsAsync(slug: string, username: string, cancellationToken): Task<List<Comment>>
+    +AddFavoriteAsync(slug: string, username: string, cancellationToken): Task<Article>
+    +DeleteFavorite(slug: string, username: string, cancellationToken): Task<Article>
+  }
+
+  class ArticlesHandler {
+    -_repository: IConduitRepository
+    +CreateArticleAsync(...)
+    +UpdateArticleAsync(...)
+    +DeleteArticleAsync(...)
+    +GetArticlesAsync(...)
+    +GetArticleBySlugAsync(...)
+    +AddCommentAsync(...)
+    +RemoveCommentAsync(...)
+    +GetCommentsAsync(...)
+    +AddFavoriteAsync(...)
+    +DeleteFavorite(...)
+  }
+
+  class ArticlesModule {
+    +AddRoutes(app: IEndpointRouteBuilder): void
+  }
+
+  class ArticleResponse {
+    +Slug: string
+    +Title: string
+    +Description: string
+    +Body: string
+    +CreatedAt: DateTimeOffset
+    +UpdatedAt: DateTimeOffset
+    +TagList: IEnumerable<string>
+    +Author: Author
+    +Favorited: bool
+    +FavoritesCount: int
+  }
+
+  class Author {
+    +Username: string
+    +Image: string
+    +Bio: string
+    +Following: bool
+  }
+
+  class ArticlesResponse {
+    +Articles: IEnumerable<ArticleResponse>
+    +ArticlesCount: int
+  }
+
+  class ArticleEnvelope<T> {
+    +Article: T
+  }
+
+  class Comment {
+    +Id: int
+    +CreatedAt: DateTimeOffset
+    +UpdatedAt: DateTimeOffset
+    +Body: string
+    +Author: Author
+  }
+
+
+
+
+
+  class ArticleEnvelope<T>
+  class ArticlesResponse
+
+  IArticlesHandler <|.. ArticlesHandler
+  ArticlesModule --> IArticlesHandler
+  ArticlesHandler --> ArticleResponse
+  ArticlesHandler --> Author
+  ArticlesHandler --> Comment
+  ArticlesModule --> ArticleEnvelope
+  ArticlesModule --> ArticlesResponse
+
+}
+@enduml
+
+
+
+/' 
+
+Dieses Diagramm zeigt die Struktur der Artikel-Komponente im Backend. Im Zentrum steht die Klasse ArticlesHandler 
+Sie enthält die gesamte Logik rund um Artikel und Kommentare ... . Sie bietet Methoden zum Erstellen, Aktualisieren, Löschen und Abrufen von Artikeln sowie zum Hinzufügen und Entfernen von Kommentaren
+Die Klasse implementiert das Interface IArticlesHandler , welches die Methoden vorgibt, die öffentlich nutzbar sind
+Die Klasse ArticlesModule verwendet dieses Interface, um die HTTP-Routen des Backends mit der Logik zu verbinden, auch verwendet ArticlesHandler mehrere Datenklassen wie:
+ArticleResponse – enthält die Daten eines Artikels, Author – beschreibt den Autor, Comment – enthält Kommentardaten.
+Zusätzlich gibt es auch Rückgabetypen wie ArticleEnvelope<T> und ArticlesResponse, sie werden verwendet, um mehrere Artikel (mit Zähler) oder einen einzelnen Artikel als Antwort der API zurückzugeben
+
+'/

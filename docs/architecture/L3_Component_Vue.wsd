@@ -1,0 +1,41 @@
+@startuml
+!include <C4/C4_Component>
+
+Container_Boundary(vueApp, "Vue 3 Frontend") {
+
+  Component(main, "main.ts", "Einstiegspunkt", "Initialisiert App, Store, Router")
+  Component(app, "App.vue", "Haupt-Komponente", "Beinhaltet RouterView und grundlegendes Layout")
+  Component(pages, "Pages", "Seitenansichten", "Konkrete Seiten wie Login, Home, Article ")
+  Component(components, "Components", "UI-Bausteine", "Wiederverwendbare UI-Komponenten")
+  Component(layouts, "Layouts", "Seitenrahmen", "Struktur mit Header/Footer ")
+  Component(router, "Router", "Navigation", "Definiert Routen und deren Zuordnung")
+  Component(stores, "Stores", "State Management", "App-Zustand über Pinia/Vue verwaltet")
+  Component(api, "API", "Backend-Zugriff", "Kommunikation mit Backend per HTTP")
+  Component(types, "Types", "Typdefinitionen", "Interfaces, z. B. für TypeScript")
+  Component(utils, "Utils", "Hilfsfunktionen", "z. B. Formatierungen, Validierungen")
+}
+
+Rel(main, app, "mountet")
+Rel(app, router, "bindet Router ein")
+Rel(app, stores, "bindet State-Management ein")
+Rel(app, layouts, "nutzt Layout-Komponenten")
+Rel(pages, components, "nutzt UI-Komponenten")
+Rel(pages, layouts, "wird in Layouts eingebettet")
+Rel(pages, stores, "greift auf globalen Zustand zu")
+Rel(pages, api, "sendet API-Requests")
+Rel(api, types, "nutzt Typen")
+Rel(stores, types, "nutzt Typen")
+Rel(pages, utils, "nutzt Hilfsfunktionen")
+@enduml
+
+
+
+/' 
+
+Das Diagramm zeigt, wie Vue-3 in verschiedene Komponenten aufgeteilt ist. Die Datei main.ts ist der Startpunkt der App, sie lädt App.vue, das die Grundstruktur der Seite 
+enthält (z. B. Navigationsbereich mit RouterView). Die App verwendet auch Router, um zu steuern, welche Seite angezeigt wird. Seiten wie Login oder Artikelansicht liegen im Ordner Pages 
+und bestehen aus kleineren Bausteinen aus dem Ordner Components. Das Layout bestimmt das allgemeine Aussehen (z. B. Header, Footer), während Stores den Zustand der App 
+verwalten (z. B. ob ein Nutzer eingeloggt ist). Mit API werden Daten vom Backend abgefragt oder gesendet (z. B. Artikel laden oder Login). Types helfen dem Entwickler, Strukturen wie 
+„Was ist ein Artikel?“ genau zu beschreiben. Und Utils sind kleine Hilfsfunktionen, z. B. für Datum-Formatierung.
+
+'/

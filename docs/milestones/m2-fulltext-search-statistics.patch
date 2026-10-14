@@ -1,0 +1,1724 @@
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Api/Features/Articles/ArticlesHandler.cs M2_abgabe/repo/apps/dotnet/src/Api/Features/Articles/ArticlesHandler.cs
+--- a/apps/dotnet/src/Api/Features/Articles/ArticlesHandler.cs	2025-04-28 11:00:53.000000000 +0200
++++ b/apps/dotnet/src/Api/Features/Articles/ArticlesHandler.cs	2025-05-16 19:36:44.000000000 +0200
+@@ -82,6 +82,10 @@
+                       {
+                           Status = 422, Title = "Article not found", Detail = $"Slug: {slug}"
+                       });
++        // Hier wird bei jedem Abruf eines Artikels der Lesezähler (ReadCount) um 1 erhöht,
++        // Dadurch ist nachvollziehbar, wie oft ein Artikel tatsächlich gelesen wurde            
++        article.ReadCount++;
++        await _repository.SaveChangesAsync(cancellationToken);
+ 
+         var comments = await _repository.GetCommentsBySlugAsync(slug, username, cancellationToken);
+         article.Comments = comments;
+@@ -153,9 +157,21 @@
+ 
+         if (articleFavorite is null)
+         {
+-            _repository.AddArticleFavorite(new ArticleFavorite(user.Username, article.Id));
+-            await _repository.SaveChangesAsync(cancellationToken);
++            _repository.AddArticleFavorite(new ArticleFavorite(user.Username, article.Id)
++            {
++                Timestamp = DateTime.UtcNow
++            });
+         }
++        else
++        {   // Beim Hinzufügen eines Favoriten wird der Zeitpunkt gespeichert,
++            // sodass später ausgewertet werden kann, wann ein Artikel favorisiert wurde
++            articleFavorite.Timestamp = DateTime.UtcNow;
++
++            // und falls der Artikel bereits favorisiert wurde, wird lediglich der Zeitstempel aktualisiert,
++            // sodass die zuletzt erfolgte Favorisierung erfasst wird
++        }
++
++        await _repository.SaveChangesAsync(cancellationToken);
+ 
+         article = await _repository.GetArticleBySlugAsync(slug, false, cancellationToken);
+         return article!;
+@@ -187,4 +203,100 @@
+         var tags = await _repository.GetTagsAsync(cancellationToken);
+         return tags.Select(x => x.Id).ToArray();
+     }
+-}
++
++
++
++    // In dieser Methode wird eine Volltextsuche über alle Artikel durchgeführt,
++    // wobei der Suchbegriff in mehrere Keywords zerlegt wird
++    public async Task<ArticlesResponseDto> SearchArticlesAsync(string query, int limit, int offset, string username, CancellationToken cancellationToken)
++    {
++        
++        // Nur bei der ersten Seite (offset = 0) wird die Suchanfrage gezählt,
++        // sodass Mehrfachzählungen bei der Navigation über die Ergebnisse vermieden werden (Paginierung)
++        if (offset == 0){
++            await TrackSearchAsync(query, cancellationToken);
++        }
++
++
++        // Der Suchstring wird in einzelne Wörter zerlegt und in Kleinbuchstaben umgewandelt,
++        // sodass die Suche unabhängig von Groß-/Kleinschreibung funktioniert
++        var keywords = query.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
++                            .Select(k => k.ToLowerInvariant())
++                            .ToList();
++
++        // Hier werden zunächst alle Artikel geladen, damit lokal gefiltert werden kann
++        var allArticles = await _repository.GetAllArticlesAsync(cancellationToken);
++
++        // Die Liste wird so gefiltert, dass alle Keywords als vollständige Wörter
++        // entweder im Titel, im Body oder in den Tags enthalten sein müssen
++        var filtered = allArticles.Where(article =>
++        {
++            var text = (article.Title + " " + article.Body).ToLowerInvariant();
++            var tags = string.Join(" ", article.Tags.Select(t => t.Id)).ToLowerInvariant();
++        
++            return keywords.All(kw =>
++                System.Text.RegularExpressions.Regex.IsMatch(text, $@"\b{System.Text.RegularExpressions.Regex.Escape(kw)}\b") || 
++                System.Text.RegularExpressions.Regex.IsMatch(tags, $@"\b{System.Text.RegularExpressions.Regex.Escape(kw)}\b"));
++        });
++
++        // Anschließend wird nur der Teil der Ergebnisse zurückgegeben, der zur aktuellen Seite gehört (Pagination)
++        var paged = filtered
++            .Skip(offset)
++            .Take(limit)
++            .ToList();
++
++        return new ArticlesResponseDto(paged, filtered.Count());
++    }
++
++
++
++
++    // In dieser Methode wird die aktuelle Suchanfrage gezählt,
++    // sodass Suchstatistiken zu gesuchten Begriffen gespeichert werden
++    public async Task TrackSearchAsync(string query, CancellationToken cancellationToken)
++
++    {
++        // Der Suchbegriff wird in einzelne Wörter zerlegt, bereinigt und sortiert,
++        // sodass doppelte oder leere Begriffe entfernt werden
++        var keywords = query.Split('+', StringSplitOptions.RemoveEmptyEntries)
++                            .Select(k => k.Trim().ToLowerInvariant())
++                            .Where(k => !string.IsNullOrWhiteSpace(k))
++                            .Distinct()
++                            .OrderBy(k => k)
++                            .ToList(); // In Liste umgewandelt
++
++        // Wenn keine gültigen Wörter vorhanden sind, wird abgebrochen
++        if (keywords.Count == 0)
++            return;
++
++        // Zusätzlich wird auch die vollständige Kombination aller Keywords gespeichert,
++        // sodass sowohl Einzelsuchbegriffe als auch zusammengesetzte Suchen gezählt werden können
++        var allKeywordIds = keywords
++            .Append(string.Join('+', keywords))
++            .Distinct();
++
++
++        foreach (var keywordId in allKeywordIds)
++        {
++            // Für jedes Keyword (oder Kombination) wird geprüft, ob bereits ein Zähler existiert
++            var existing = await _repository.GetSearchCountAsync(keywordId, cancellationToken);
++            if (existing == null)
++            {
++                // Wenn nicht, wird ein neuer Eintrag mit Count = 1 erstellt
++                _repository.AddSearchCount(new SearchCount
++                {
++                    KeywordId = keywordId,
++                    Count = 1
++                });
++            }
++            else
++            {
++                // Andernfalls wird der bestehende Zähler um 1 erhöht
++                existing.Count++;
++            }
++        }
++
++        // Abschließend werden alle Änderungen gespeichert, sodass die Zähler in der Datenbank aktualisiert werden
++        await _repository.SaveChangesAsync(cancellationToken);
++    }
++}
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Api/Features/Articles/ArticlesMapper.cs M2_abgabe/repo/apps/dotnet/src/Api/Features/Articles/ArticlesMapper.cs
+--- a/apps/dotnet/src/Api/Features/Articles/ArticlesMapper.cs	2025-04-28 11:00:53.000000000 +0200
++++ b/apps/dotnet/src/Api/Features/Articles/ArticlesMapper.cs	2025-05-16 19:36:44.000000000 +0200
+@@ -22,7 +22,9 @@
+                 author.Bio,
+                 author.Followers.Any()),
+             article.Favorited,
+-            article.FavoritesCount);
++            article.FavoritesCount,
++            //Hier wird der neue Wert 'ReadCount' an das DTO übergeben, sodass die Anzahl der Artikelaufrufe im Frontend angezeigt werden kann
++            article.ReadCount); // (Hier wird der Wert aus dem Datenbankobjekt in das DTO kopiert)
+         return result;
+     }
+ 
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Api/Features/Articles/ArticlesModel.cs M2_abgabe/repo/apps/dotnet/src/Api/Features/Articles/ArticlesModel.cs
+--- a/apps/dotnet/src/Api/Features/Articles/ArticlesModel.cs	2025-04-28 11:00:53.000000000 +0200
++++ b/apps/dotnet/src/Api/Features/Articles/ArticlesModel.cs	2025-05-16 19:36:44.000000000 +0200
+@@ -24,6 +24,9 @@
+     IEnumerable<string> TagList,
+     Author Author,
+     bool Favorited,
+-    int FavoritesCount);
++    int FavoritesCount,
++    // Diese neue Eigenschaft speichert, wie oft ein Artikel angesehen wurde
++    // Der Wert wird aus der Datenbank übernommen und im Frontend zur Anzeige verwendet
++    int ReadCount); // (Das ist das Datenfeld, das im JSON an das Frontend geht)
+ 
+ public record ArticlesResponse(IEnumerable<ArticleResponse> Articles, int ArticlesCount);
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Api/Features/Articles/ArticlesModule.cs M2_abgabe/repo/apps/dotnet/src/Api/Features/Articles/ArticlesModule.cs
+--- a/apps/dotnet/src/Api/Features/Articles/ArticlesModule.cs	2025-04-28 11:00:53.000000000 +0200
++++ b/apps/dotnet/src/Api/Features/Articles/ArticlesModule.cs	2025-05-16 19:36:44.000000000 +0200
+@@ -167,5 +167,43 @@
+                 })
+             .Produces(StatusCodes.Status401Unauthorized)
+             .WithName("DeleteArticleComment");
++
++        
++        
++        // Diese Methode definiert den GET-Endpunkt /api/articles/search,
++        // über den authentifizierte Nutzer eine Volltextsuche durchführen können
++        authorizedGroup.MapGet("/search",
++                async Task<Results<Ok<ArticlesResponse>, UnauthorizedHttpResult>>
++                ([AsParameters] SearchQuery search, IArticlesHandler articlesHandler, ClaimsPrincipal claimsPrincipal) =>
++                {
++                    // Hier wird der eingeloggte Benutzer aus dem JWT-Token gelesen,
++                    // sodass die Suche nur von authentifizierten Nutzern aufgerufen werden kann
++                    var user = claimsPrincipal.FindFirstValue(ClaimTypes.NameIdentifier);
++
++                    // Falls kein Benutzer identifiziert werden konnte (z.B Token fehlt oder ungültig),
++                    // wird eine 401 Unauthorized-Antwort zurückgegeben
++                    if (string.IsNullOrEmpty(user))
++                        return TypedResults.Unauthorized();
++
++                    // Die zentrale Logik der Volltextsuche wird über den ArticlesHandler aufgerufen
++                    // Dabei werden Suchbegriff (Query), Limit und Offset an die Methode übergeben
++                    var response = await articlesHandler.SearchArticlesAsync(search.Query, search.Limit, search.Offset, user, new CancellationToken());
++
++                    // Die gefundenen Artikel werden anschließend mithilfe des Mappers
++                    // in das gewünschte API-Response-Format umgewandelt
++                    var result = ArticlesMapper.MapFromArticles(response);
++                    
++                    return TypedResults.Ok(result); // Das Ergebnis wird mit HTTP 200 OK an den Client zurückgesendet
++                })
++
++            // Ergebniss im Swagger:
++            // Die Route gibt ein Objekt vom Typ ArticlesResponse zurück,
++            // oder im Fehlerfall einen 401 Unauthorized Status
++            .Produces<ArticlesResponse>(StatusCodes.Status200OK)
++            .Produces(StatusCodes.Status401Unauthorized)
++            .WithName("SearchArticles");
++
++
++        
+     }
+ }
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Api/Features/Articles/IArticlesHandler.cs M2_abgabe/repo/apps/dotnet/src/Api/Features/Articles/IArticlesHandler.cs
+--- a/apps/dotnet/src/Api/Features/Articles/IArticlesHandler.cs	2025-04-28 11:00:53.000000000 +0200
++++ b/apps/dotnet/src/Api/Features/Articles/IArticlesHandler.cs	2025-05-16 19:36:44.000000000 +0200
+@@ -29,4 +29,16 @@
+     public Task<Article> AddFavoriteAsync(string slug, string username, CancellationToken cancellationToken);
+ 
+     public Task<Article> DeleteFavorite(string slug, string username, CancellationToken cancellationToken);
++
++
++    // Diese Methode wird aufgerufen, wenn eine Volltextsuche im System durchgeführt wird
++    // Dabei werden die Suchbegriffe (query), die Anzahl der Ergebnisse pro Seite (limit)
++    // sowie die Startposition (offset) übergeben, sodass eine paginierte Ergebnisliste zurückgegeben wird 
++    Task<ArticlesResponseDto> SearchArticlesAsync(string query, int limit, int offset, string username, CancellationToken cancellationToken);
++    
++    // Diese Methode wird aufgerufen, wenn eine Suche neu gestartet wird (offset = 0),
++    // sodass die verwendeten Keywords in der Datenbank gezählt und gespeichert werden können
++    Task TrackSearchAsync(string query, CancellationToken cancellationToken);
++
++
+ }
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Core/Dto/ArticleDto.cs M2_abgabe/repo/apps/dotnet/src/Core/Dto/ArticleDto.cs
+--- a/apps/dotnet/src/Core/Dto/ArticleDto.cs	2025-04-28 11:00:53.000000000 +0200
++++ b/apps/dotnet/src/Core/Dto/ArticleDto.cs	2025-05-16 19:36:44.000000000 +0200
+@@ -25,6 +25,13 @@
+ 
+ public record FeedQuery(int Limit = 20, int Offset = 0);
+ 
++
++// Dieses Record wird verwendet, um eine Suchanfrage an den /search-Endpunkt zu übergeben
++// Dabei wird der Suchtext als Query übergeben und mit Limit und Offset kombiniert,
++// sodass eine paginierte Volltextsuche durchgeführt werden kann
++public record SearchQuery(string Query,int Limit,int Offset = 0);
++
++
+ public record CommentDto(string body);
+ 
+ public enum ArticleSort
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Core/Entities/Article.cs M2_abgabe/repo/apps/dotnet/src/Core/Entities/Article.cs
+--- a/apps/dotnet/src/Core/Entities/Article.cs	2025-04-28 11:00:53.000000000 +0200
++++ b/apps/dotnet/src/Core/Entities/Article.cs	2025-05-16 19:36:44.000000000 +0200
+@@ -40,6 +40,12 @@
+     public List<Comment> Comments { get; set; } = new();
+     public ICollection<ArticleFavorite> ArticleFavorites { get; set; } = new List<ArticleFavorite>();
+ 
++
++    // Gibt an, wie oft der Artikel gelesen wurde
++    // Dieser Wert wird bei jedem Abruf (über GetArticleBySlugAsync) automatisch erhöht
++    public int ReadCount { get; set; } = 0;
++
++
+     public void UpdateArticle(ArticleUpdateDto update)
+     {
+         if (!string.IsNullOrWhiteSpace(update.Title))
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Core/Entities/ArticleFavorite.cs M2_abgabe/repo/apps/dotnet/src/Core/Entities/ArticleFavorite.cs
+--- a/apps/dotnet/src/Core/Entities/ArticleFavorite.cs	2025-04-28 11:00:53.000000000 +0200
++++ b/apps/dotnet/src/Core/Entities/ArticleFavorite.cs	2025-05-16 19:36:44.000000000 +0200
+@@ -15,4 +15,10 @@
+     public User User { get; set; } = null!;
+ 
+     public Article Article { get; set; } = null!;
++
++
++    // Speichert den Zeitpunkt, zu dem der Artikel zuletzt favorisiert wurde
++    // Diese Information wird aktualisiert, wenn ein Nutzer den Artikel als Favorit markiert
++    public DateTime? Timestamp { get; set; }
++
+ }
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Core/Entities/SearchCount.cs M2_abgabe/repo/apps/dotnet/src/Core/Entities/SearchCount.cs
+--- a/apps/dotnet/src/Core/Entities/SearchCount.cs	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/dotnet/src/Core/Entities/SearchCount.cs	2025-05-16 19:36:44.000000000 +0200
+@@ -0,0 +1,16 @@
++using System.ComponentModel.DataAnnotations;
++
++namespace Realworlddotnet.Core.Entities
++{
++    
++    // Repräsentiert die Anzahl der Suchanfragen pro Keyword
++    // Für jedes eindeutige Keyword wird ein Zähler geführt, der bei jeder Suche erhöht wird
++    public class SearchCount
++    {
++        // Dient als eindeutiger Schlüssel für das Keyword
++        [Key]
++        public string KeywordId { get; set; } = string.Empty;
++        
++        public int Count { get; set; } = 0;// Gibt an, wie oft dieses Keyword (oder diese Kombination) gesucht wurde
++    }
++}
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Core/Repositories/IConduitRepository.cs M2_abgabe/repo/apps/dotnet/src/Core/Repositories/IConduitRepository.cs
+--- a/apps/dotnet/src/Core/Repositories/IConduitRepository.cs	2025-04-28 11:00:53.000000000 +0200
++++ b/apps/dotnet/src/Core/Repositories/IConduitRepository.cs	2025-05-16 19:36:44.000000000 +0200
+@@ -42,4 +42,15 @@
+     public void Follow(string username, string followerUsername);
+ 
+     public void UnFollow(string username, string followerUsername);
++
++
++    Task<List<Article>> GetAllArticlesAsync(CancellationToken cancellationToken);  // Gibt alle Artikel ungefiltert zurück, sie wird für die Volltextsuche benötigt
++
++    // Gibt das SearchCount-Objekt für ein bestimmtes Keyword zurück, sofern vorhanden
++    // Wird verwendet, um bestehende Einträge bei einer Suche zu aktualisieren
++    Task<SearchCount?> GetSearchCountAsync(string keywordId, CancellationToken cancellationToken);
++    
++    void AddSearchCount(SearchCount entry); // Fügt einen neuen Zähleintrag für ein Keyword hinzu, falls es noch nicht existiert
++
++
+ }
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Data/Contexts/ConduitContext.cs M2_abgabe/repo/apps/dotnet/src/Data/Contexts/ConduitContext.cs
+--- a/apps/dotnet/src/Data/Contexts/ConduitContext.cs	2025-04-28 11:00:53.000000000 +0200
++++ b/apps/dotnet/src/Data/Contexts/ConduitContext.cs	2025-05-16 19:36:44.000000000 +0200
+@@ -17,6 +17,11 @@
+     public DbSet<UserLink> FollowedUsers { get; set; } = null!;
+ 
+     public DbSet<ArticleFavorite> ArticleFavorites { get; set; } = null!;
++    
++    // Hier wird eine neue DbSet-Eigenschaft SearchCounts definiert,
++    // sodass auf die neue Datenbanktabelle für SearchCount direkt zugegriffen werden kann
++    public DbSet<SearchCount> SearchCounts { get; set; } = null!;
++
+ 
+     protected override void OnModelCreating(ModelBuilder modelBuilder)
+     {
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Data/Migrations/20250509092357_conductStatisticMigration.cs M2_abgabe/repo/apps/dotnet/src/Data/Migrations/20250509092357_conductStatisticMigration.cs
+--- a/apps/dotnet/src/Data/Migrations/20250509092357_conductStatisticMigration.cs	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/dotnet/src/Data/Migrations/20250509092357_conductStatisticMigration.cs	2025-05-16 19:36:44.000000000 +0200
+@@ -0,0 +1,83 @@
++﻿using System;
++using Microsoft.EntityFrameworkCore.Migrations;
++
++#nullable disable
++
++namespace Realworlddotnet.Data.Migrations
++{
++
++
++    // Diese Datei wurde automatisch durch den Befehl `dotnet ef migrations add` erzeugt
++    // Sie beschreibt die Änderungen an der Datenbankstruktur in zwei Methoden:
++    
++    // - Up():    Hier wird definiert, wie die Datenbank erweitert wird, z.B durch neue Tabellen
++    //            für SearchCounts, einen Lesezähler (ReadCount) in Artikeln
++    //            oder einen Zeitstempel (Timestamp) bei Favoriten
++    
++    // - Down():  Hier wird beschrieben, wie diese Änderungen wieder rückgängig gemacht werden können
++    
++    // Diese Datei wird von EF Core beim Ausführen einer Migration tatsächlich verwendet,
++    // z.B mit `dotnet ef database update`, um die Datenbankstruktur an den aktuellen Code anzupassen
++
++
++
++
++
++
++    /// <inheritdoc />
++    public partial class conductStatisticMigration : Migration
++    {
++        /// <inheritdoc />
++        protected override void Up(MigrationBuilder migrationBuilder)
++        {
++
++            // neues Feld: ReadCount für Zugriffszählung
++            migrationBuilder.AddColumn<int>(
++                name: "ReadCount",
++                table: "Articles",
++                type: "INTEGER",
++                nullable: false,
++                defaultValue: 0);
++
++            //  neues Feld: Timestamp (wann favorisiert wurde)
++            migrationBuilder.AddColumn<DateTime>(
++                name: "Timestamp",
++                table: "ArticleFavorites",
++                type: "TEXT",
++                nullable: true);
++
++
++            // Neue Tabelle zur Erfassung, wie oft ein bestimmter Suchbegriff verwendet wurde
++            migrationBuilder.CreateTable(
++                name: "SearchCounts",
++                columns: table => new
++                {
++                    KeywordId = table.Column<string>(type: "TEXT", nullable: false),
++                    Count = table.Column<int>(type: "INTEGER", nullable: false)
++                },
++                constraints: table =>
++                {
++                    table.PrimaryKey("PK_SearchCounts", x => x.KeywordId);
++                });
++        }
++
++        /// <inheritdoc />
++        
++
++
++        // Falls die Migration zurückgerollt wird, werden hier alle erstellten Tabellen wieder gelöscht
++        protected override void Down(MigrationBuilder migrationBuilder)
++        {
++            migrationBuilder.DropTable(
++                name: "SearchCounts");
++
++            migrationBuilder.DropColumn(
++                name: "ReadCount",
++                table: "Articles");
++
++            migrationBuilder.DropColumn(
++                name: "Timestamp",
++                table: "ArticleFavorites");
++        }
++    }
++}
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Data/Migrations/conductStatisticMigration.sql M2_abgabe/repo/apps/dotnet/src/Data/Migrations/conductStatisticMigration.sql
+--- a/apps/dotnet/src/Data/Migrations/conductStatisticMigration.sql	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/dotnet/src/Data/Migrations/conductStatisticMigration.sql	2025-05-16 19:36:44.000000000 +0200
+@@ -0,0 +1,17 @@
++﻿BEGIN TRANSACTION;
++
++-- Erstellt eine neue Tabelle zur Speicherung von Suchbegriffen und deren Häufigkeit
++CREATE TABLE "SearchCounts" (
++    "KeywordId" TEXT NOT NULL CONSTRAINT "PK_SearchCounts" PRIMARY KEY,
++    "Count" INTEGER NOT NULL
++);
++
++-- Fügt der bestehenden Tabelle "Articles" eine neue Spalte hinzu,
++-- um mitzuzählen, wie oft ein Artikel aufgerufen wurde
++ALTER TABLE "Articles" ADD COLUMN "ReadCount" INTEGER NOT NULL DEFAULT 0;
++
++-- Fügt der bestehenden Tabelle "ArticleFavorites" eine neue Spalte hinzu,
++-- um den Zeitpunkt eines Likes (Favorit) zu speichern
++ALTER TABLE "ArticleFavorites" ADD COLUMN "Timestamp" TEXT NULL;
++
++COMMIT;
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/dotnet/src/Data/Services/ConduitRepository.cs M2_abgabe/repo/apps/dotnet/src/Data/Services/ConduitRepository.cs
+--- a/apps/dotnet/src/Data/Services/ConduitRepository.cs	2025-04-28 11:00:53.000000000 +0200
++++ b/apps/dotnet/src/Data/Services/ConduitRepository.cs	2025-05-16 19:36:44.000000000 +0200
+@@ -236,4 +236,88 @@
+     {
+         _context.FollowedUsers.Remove(new UserLink(username, followerUsername));
+     }
+-}
++
++
++
++    // Hier wird eine Liste aller Artikel aus der Datenbank geladen,
++    // sodass sie für Volltextsuche verwendet werden kann
++    public async Task<List<Article>> GetAllArticlesAsync(CancellationToken cancellationToken)
++    {
++        return await _context.Articles
++            .Include(x => x.Author) // Hier wird der Autor direkt mitgeladen
++            .Include(x => x.Tags)   // Hier werden die Tags direkt mitgeladen
++            .AsNoTracking()         // Hier wird das Ergebnis ohne Tracking geladen, sodass keine Änderungen verfolgt werden
++            .ToListAsync(cancellationToken);
++    }
++
++
++    // Hier wird ein bestimmter Suchbegriff aus der Tabelle SearchCounts gelesen,
++    // sodass die aktuelle Anzahl der bisherigen Suchanfragen zu diesem Begriff ermittelt werden kann
++    public async Task<SearchCount?> GetSearchCountAsync(string keywordId, CancellationToken cancellationToken)
++    {
++        return await _context.SearchCounts.FindAsync(new object[] { keywordId }, cancellationToken);
++    }
++
++
++    // Hier wird ein neuer Eintrag in der Tabelle SearchCounts hinzugefügt,
++    // sodass ein neuer Suchbegriff mit Zähler 1 gespeichert wird
++    public void AddSearchCount(SearchCount entry)
++    {
++        _context.SearchCounts.Add(entry);
++    }
++
++
++    // Hier wird eine gesamte Suchanfrage verarbeitet und die enthaltenen Schlüsselwörter extrahiert,
++    // sodass sie jeweils einzeln und auch kombiniert gezählt werden können
++    public async Task SaveSearchKeywordsAsync(string query, CancellationToken cancellationToken)
++    {
++        // Hier wird überprüft, ob die Suchanfrage leer ist,
++        // sodass leere oder ungültige Eingaben ignoriert werden
++        if (string.IsNullOrWhiteSpace(query))
++            return;
++
++        // Hier wird die Suchanfrage in einzelne Wörter zerlegt und bereinigt,
++        // sodass sie als einzelne Keywords gespeichert werden können
++        var keywords = query.Split('+', StringSplitOptions.RemoveEmptyEntries) // Hier wird die Query bei "+" getrennt, sodass mehrere Begriffe einzeln verarbeitet werden
++
++                             .Select(k => k.Trim()) // Hier wird jeder Begriff getrimmt, sodass unnötige Leerzeichen entfernt werden
++
++                             .Where(k => !string.IsNullOrWhiteSpace(k)) // Hier werden leere Begriffe entfernt, sodass nur sinnvolle Wörter bleibe
++
++                             .Distinct() // Hier wird jeder Begriff nur einmal behalten, sodass Dopplungen vermieden werden
++                            
++                            // Hier werden die Begriffe sortiert, sodass sie einheitlich gespeichert werden
++                             .OrderBy(k => k)
++                             .ToList();
++
++        // Hier wird abgebrochen, wenn keine gültigen Begriffe übrig sind, sodass nichts gespeichert wird
++        if (!keywords.Any())
++            return;
++
++
++        // Hier wird die kombinierte Keyword-Suchanfrage erstellt,
++        // sodass auch Kombinationen (wort1+wort2) gezählt werden können
++        var fullKeywordId = string.Join("+", keywords);
++        var allKeywordIds = keywords.Concat(new[] { fullKeywordId });
++
++        // Hier wird jeder Begriff (einzeln und kombiniert) überprüft,
++        // sodass entweder ein neuer Eintrag erstellt oder ein bestehender hochgezählt wird
++        foreach (var keywordId in allKeywordIds)
++        {
++            var entry = await _context.SearchCounts.FindAsync(new object[] { keywordId }, cancellationToken);
++            if (entry == null)
++            {
++                _context.SearchCounts.Add(new SearchCount { KeywordId = keywordId, Count = 1 });
++            }
++            else
++            {
++                entry.Count += 1;
++            }
++        }
++
++        // Hier werden alle Änderungen gespeichert,
++        // sodass die Statistiken dauerhaft in der Datenbank abgelegt sind
++        await _context.SaveChangesAsync(cancellationToken);
++    }
++
++}    
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/navigator/route.dart M2_abgabe/repo/apps/flutter/lib/navigator/route.dart
+--- a/apps/flutter/lib/navigator/route.dart	2025-04-28 11:00:53.000000000 +0200
++++ b/apps/flutter/lib/navigator/route.dart	2025-05-16 19:36:44.000000000 +0200
+@@ -25,6 +25,7 @@
+ import 'package:conduit/ui/login/login_screen.dart';
+ import 'package:conduit/ui/my_articles/my_articles_screen.dart';
+ import 'package:conduit/ui/register/register_screen.dart';
++import 'package:conduit/ui/search_screen.dart'; // importiert SearchScreen, sodass sie im Routing-System verfügbar ist
+ import 'package:conduit/ui/splash/splash_screen.dart';
+ import 'package:conduit/ui/tag_screen/tag_screen.dart';
+ import 'package:conduit/utils/route_transition.dart';
+@@ -263,6 +264,20 @@
+       case SplashScreen.splashUrl:
+         return MaterialPageRoute(
+             builder: (context) => SplashScreen(), settings: settings);
++
++//------------------------------------------------------
++
++      // Hier wird die Route zur neuen Suchseite definiert
++      // Wenn `SearchScreen.searchUrl` aufgerufen wird (z.B durch Drawer oder Navigator)
++      // wird die `SearchScreen` als neue Seite geladen
++
++      case SearchScreen.searchUrl:
++        return MaterialPageRoute(
++            builder: (context) => const SearchScreen(), // Erstellt die Suchseite
++            settings: settings,  // Hier werden Informationen zur Navigation übergeben, z.B Routenname (/search)
++        );
++
++//------------------------------------------------------
+       default:
+         return MaterialPageRoute(
+           builder: (_) => Scaffold(
+@@ -273,4 +288,4 @@
+         );
+     }
+   }
+-}
++}
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/repository/all_article_repo.dart M2_abgabe/repo/apps/flutter/lib/repository/all_article_repo.dart
+--- a/apps/flutter/lib/repository/all_article_repo.dart	2025-04-28 11:00:53.000000000 +0200
++++ b/apps/flutter/lib/repository/all_article_repo.dart	2025-05-16 19:36:44.000000000 +0200
+@@ -429,4 +429,52 @@
+       );
+     }
+   }
+-}
++
++  // Diese Methode ruft die Artikelsuche vom Backend auf und gibt die Treffer als Map zurück
++  // Sie verwendet den eingegebenen Suchbegriff (query), eine Seitenbegrenzung (limit) und einen Offset für die Paginierung
++  Future<Map<String, dynamic>> searchArticles(String query, int offset, int limit) async {
++
++    // Hier wird der aktuell eingeloggte Benutzer aus dem lokalen Speicher (Hive) geladen,
++    // um an seinen Token für die Authentifizierung zu kommen
++    Box<UserAccessData>? detailModel = await hiveStore.isExistUserAccessData();
++    final token = detailModel?.values.first.token;
++
++    // Der Suchtext wird so vorbereitet, dass er in der URL erlaubt ist:
++    // Mehrere Begriffe werden durch "+" verbunden (Alle Leerzeichen im Text werden durch "+" ersetzt) und anschließend vollständig URL-kodiert
++    final encodedQuery = Uri.encodeComponent(query.replaceAll(" ", "+"));
++    
++    // Die vollständige URL für die GET-Anfrage an den Search-Endpunkt wird zusammengebaut
++    // Dabei werden Suchbegriff, Offset und Limit als Parameter mitgegeben
++    final url = '${ApiConstant.BASE_URL}${ApiConstant.SUB_URL}/articles/search?query=$encodedQuery&limit=$limit&offset=$offset';
++
++      // Die HTTP-Anfrage wird abgeschickt, inklusive Token im Header zur Authentifizierung
++    final response = await http.get(
++      Uri.parse(url),
++      headers: {
++        'Authorization': 'Bearer $token', // JWT-Token für Zugriffsschutz
++        'Accept': 'application/json',     // Antwortformat: JSON
++      },
++    );
++
++    // Wenn der Server erfolgreich geantwortet hat (HTTP 200 OK),
++    // werden die Artikel und die Gesamtanzahl aus der Antwort extrahiert und zurückgegeben
++    if (response.statusCode == 200) {
++      final Map<String, dynamic> jsonData = json.decode(response.body);
++      return {
++        'articles': List<AllArticlesModel>.from(
++          jsonData["articles"].map((e) => AllArticlesModel.fromJson(e)), // Jeder Artikel wird ins Datenmodell konvertiert
++        ),
++        'articlesCount': jsonData["articlesCount"], // Anzahl aller Treffer
++      };
++    }
++    // Wenn kein gültiger Token vorhanden ist, wird ein Fehler ausgelöst
++     else if (response.statusCode == 401) {
++      throw Exception("Unauthorized");
++    } 
++    // Für alle anderen HTTP-Fehlercodes wird ebenfalls ein Fehler geworfen
++    else {
++      throw Exception("Search failed with status: ${response.statusCode}"); // Fehler mit Statuscode anzeigen
++    }
++  }
++
++}
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/ui/base/drawer.dart M2_abgabe/repo/apps/flutter/lib/ui/base/drawer.dart
+--- a/apps/flutter/lib/ui/base/drawer.dart	2025-04-28 11:00:53.000000000 +0200
++++ b/apps/flutter/lib/ui/base/drawer.dart	2025-05-16 19:36:44.000000000 +0200
+@@ -3,6 +3,7 @@
+ import 'package:conduit/ui/profile/profile_screen.dart';
+ import 'package:conduit/ui/change_password/change_password_screen.dart';
+ import 'package:conduit/ui/my_articles/my_articles_screen.dart';
++import 'package:conduit/ui/search_screen.dart'; //  bindet SearchScreen ein, sodass sie im Drawer-Menü aufgerufen und angezeigt werden kann
+ import 'package:conduit/utils/AppColors.dart';
+ import 'package:conduit/utils/functions.dart';
+ import 'package:conduit/utils/image_string.dart';
+@@ -134,6 +135,38 @@
+                 //     ?.pushNamed(ChangePasswordScreen.changePasswordUrl);
+               },
+             ),
++
++
++//-------------------------------------------------------------------------------------
++
++            Divider(endIndent: 20, indent: 20),
++
++            // Ein Menüeintrag im Drawer, der den Nutzer zur Artikelsuche führt
++            ListTile(
++
++              // Hier wird der Text für den Menüpunkt festgelegt
++              title: const Text(
++                'Suche',
++                style: TextStyle(
++                  fontFamily: ConduitFontFamily.robotoRegular,
++                ),
++              ),
++              // Das Lupensymbol zeigt an, dass es sich um die Suchfunktion handelt
++              leading: Icon(
++                Icons.search,
++                color: AppColors.primaryColor,
++              ),
++
++              // Diese Funktion wird ausgeführt, wenn der Nutzer auf den Eintrag klickt
++              onTap: () {
++                Navigator.pop(context); // Zuerst schließen wir das Menü
++                Navigator.pushNamed(context, SearchScreen.searchUrl); // dann öffnen wir die Suchseite
++              },
++            ),
++
++//-------------------------------------------------------------------------------------
++
++
+             Divider(endIndent: 20, indent: 20),
+             ListTile(
+               title: const Text(
+@@ -245,4 +278,4 @@
+       },
+     );
+   }
+-}
++}
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/flutter/lib/ui/search_screen.dart M2_abgabe/repo/apps/flutter/lib/ui/search_screen.dart
+--- a/apps/flutter/lib/ui/search_screen.dart	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/flutter/lib/ui/search_screen.dart	2025-05-16 19:36:44.000000000 +0200
+@@ -0,0 +1,228 @@
++//Dieser Code implementiert die Suchseite (`SearchScreen`) einer Flutter-App
++//Benutzer können hier Wörter eingeben, um nach Artikeln zu suchen
++//Die App sendet die Suchanfrage an das Backend, zeigt die Ergebnisse in einer scrollbaren Liste an und unterstützt Pagination 
++//(Seitenwechsel), Ladeanzeige, Fehlermeldungen bei Internetproblemen und Aktualisierung per Pull-to-Refresh
++//Alle Anfragen werden über das Repository `AllArticlesImpl` abgewickelt
++
++
++import 'package:conduit/model/all_article_model.dart';
++import 'package:conduit/repository/all_article_repo.dart';
++import 'package:conduit/utils/AppColors.dart';
++import 'package:conduit/utils/message.dart';
++import 'package:conduit/widget/all_article_widget.dart';
++import 'package:conduit/widget/no_internet.dart';
++import 'package:conduit/utils/theme_container.dart';
++import 'package:flutter/material.dart';
++
++// Diese StatefulWidget-Klasse bildet die Suchseite ab, da hier der Zustand (z.B Ladeanzeige, Ergebnisse) dynamisch ist
++class SearchScreen extends StatefulWidget {
++  // Hier wird die Route für den Suchbildschirm definiert, um sie im Routing-System aufzurufen
++  static const searchUrl = '/search';
++  const SearchScreen({Key? key}) : super(key: key);
++
++  @override
++  State<SearchScreen> createState() => _SearchScreenState();  // Hier wird das Such-Widget mit optionalem Key-Parameter erstellt
++}
++
++// In dieser Klasse wird der Zustand der Suchseite verwaltet
++class _SearchScreenState extends State<SearchScreen> {
++  // Dieser boolesche Wert gibt an, ob ein Verbindungsfehler (z.B kein Internet) vorliegt
++  bool isNoInternet = false;
++
++  // Dieser Wert zeigt an, ob die Anwendung gerade eine Suchanfrage verarbeitet
++  bool isLoading = false;
++
++  // Diese Variable speichert, ob bereits eine Suchanfrage durchgeführt wurde
++  bool isSearchPerformed = false;
++
++  // Diese Variable speichert die aktuelle Seite für die Paginierung
++  int currentPage = 1;
++
++  // Diese Konstante gibt an, wie viele Artikel pro Seite geladen werden sollen
++  int limit = 10;
++
++  // Diese Variable speichert die Gesamtanzahl der gefundenen Artikel
++  int totalCount = 0;
++
++  // Hier wird der aktuelle Suchbegriff gespeichert, der aus dem Eingabefeld stammt
++  String query = "";
++
++  // Diese Liste enthält die Suchergebnisse als Artikelobjekte
++  List<AllArticlesModel> articles = [];
++
++  // Dieses Textfeld-Element erlaubt es, die Benutzereingabe im Suchfeld zu erfassen und zu verarbeiten
++  final TextEditingController controller = TextEditingController();
++
++  // Mit dieser Methode wird eine neue Suche gestartet, indem der Text aus dem Eingabefeld übernommen wird
++  void startNewSearch() {
++    // Wenn das Eingabefeld leer ist, wird die Suche nicht gestartet
++    if (controller.text.trim().isEmpty) return;
++
++    setState(() {
++      // Hier wird der eingegebene Suchtext vorbereitet, indem mehrere Leerzeichen durch "+" ersetzt werden
++      query = controller.text.trim().replaceAll(RegExp(r'\s+'), '+');
++
++      // Die Seitennummer wird zurückgesetzt, damit die Suche auf der ersten Seite beginnt
++      currentPage = 1;
++
++      // Diese Variable wird auf true gesetzt, um anzuzeigen, dass eine Suche erfolgt ist
++      isSearchPerformed = true;
++    });
++
++    // Anschließend wird die eigentliche Suchlogik aufgerufen
++    performSearch();
++  }
++
++  // Diese Methode ruft die Artikel vom Server ab und verarbeitet die Ergebnisse
++  Future<void> performSearch() async {
++    try {
++      // Zunächst wird der Ladezustand aktiviert und vorherige Fehler zurückgesetzt
++      setState(() {
++        isLoading = true;
++        isNoInternet = false;
++      });
++
++      // Der Offset wird basierend auf der aktuellen Seite berechnet
++      final offset = (currentPage - 1) * limit;
++
++      // Hier wird die Suchfunktion aus dem Repository aufgerufen, um die Daten von der API abzurufen
++      final result = await AllArticlesImpl().searchArticles(query, offset, limit);
++
++      // Nach erfolgreichem Abruf werden die Artikel und die Gesamtanzahl gespeichert
++      setState(() {
++        articles = result['articles'];
++        totalCount = result['articlesCount'];
++        isLoading = false;
++      });
++    } catch (e) {
++      // Bei einem Fehler (z.B Netzwerkproblem) wird ein Fehlerzustand gezeigt
++      print("Search error: $e");
++      setState(() {
++        isNoInternet = true;
++        isLoading = false;
++      });
++    }
++  }
++
++  // Diese Methode wird aufgerufen, um zur nächsten Seite zu wechseln
++  void nextPage() {
++    // Wenn weitere Seiten vorhanden sind, wird die aktuelle Seite erhöht und die Suche erneut durchgeführt
++    if ((currentPage * limit) < totalCount) {
++      setState(() => currentPage++);
++      performSearch();
++    }
++  }
++
++  // Diese Methode wird aufgerufen, um zur vorherigen Seite zu wechseln
++  void prevPage() {
++    if (currentPage > 1) {
++      setState(() => currentPage--);
++      performSearch();
++    }
++  }
++
++  // Diese Methode baut das UI der Seite auf
++  @override
++  Widget build(BuildContext context) {
++    return Scaffold(
++      // Hier wird die App-Leiste mit dem Titel und einem Suchsymbol aufgebaut
++      appBar: AppBar(
++        title: Text("Search Articles"),
++        backgroundColor: AppColors.primaryColor, // Farbe aus Designsystem
++        actions: [
++          // Such-Icon wird oben rechts angezeigt
++          IconButton(
++            icon: Icon(Icons.search),
++            onPressed: startNewSearch, // Ein Klick startet die Suche
++          )
++        ],
++      ),
++
++      // Der Inhalt der Seite wird in einem speziellen Container dargestellt
++      body: ThemeContainer(
++        child: isNoInternet
++            // Wenn kein Internet vorhanden ist, wird eine Retry-Komponente angezeigt
++            ? NoInternet(onClickRetry: performSearch)
++            : SafeArea(
++                // Sorgt dafür, dass Inhalte nicht unter Statusleiste oder Notch landen
++                child: Padding(
++                  padding: const EdgeInsets.all(16.0),
++                  child: Column(
++                    children: [
++                      // Dieses Textfeld wird verwendet, damit der Benutzer Suchbegriffe eingeben kann
++                      TextField(
++                        controller: controller, // Steuert Eingabe
++                        decoration: InputDecoration(
++                          hintText: "Enter keywords...", // Platzhaltertext
++                          suffixIcon: IconButton(
++                            icon: Icon(Icons.clear),
++                            onPressed: () => controller.clear(), // Löscht die Eingabe
++                          ),
++                        ),
++                        onSubmitted: (_) => startNewSearch(), // Auch Enter-Taste startet die Suche
++                      ),
++                      SizedBox(height: 10),
++
++                      // Wenn die Suche durchgeführt wurde und Treffer vorliegen, wird die Anzahl angezeigt
++                      if (isSearchPerformed && totalCount > 0)
++                        Padding(
++                          padding: const EdgeInsets.only(bottom: 8.0),
++                          child: Text(
++                            "$totalCount Artikel gefunden.",
++                            style: TextStyle(fontWeight: FontWeight.bold),
++                          ),
++                        ),
++
++                      // Während die Artikel geladen werden, wird ein Ladesymbol angezeigt
++                      if (isLoading)
++                        Center(child: CToast.instance.showLoader())
++
++                      // Wenn keine Artikel gefunden wurden, wird dies als Nachricht angezeigt
++                      else if (articles.isEmpty && isSearchPerformed)
++                        Text("No articles found.")
++
++                      // Wenn Artikel vorhanden sind, wird eine Liste angezeigt
++                      else
++                        Expanded(
++                          child: RefreshIndicator(
++                            onRefresh: performSearch, // Wenn der Nutzer die Liste nach unten zieht, wird die Suche erneut gestartet
++                            child: ListView.separated(
++                              itemCount: articles.length, // Gibt an, wie viele Artikel in der Liste angezeigt werden
++                              itemBuilder: (context, index) => AllAirtistWidget(
++                                articlesModel: articles[index], // Hier wird ein einzelner Artikel an das Widget übergeben
++                                onRefresh: performSearch, // Diese Funktion wird aufgerufen, wenn das Widget aktualisiert werden soll
++                              ),
++                              separatorBuilder: (_, __) => SizedBox(height: 10), // Abstand zwischen Artikeln
++                            ),
++                          ),
++                        ),
++
++                      // Wenn Artikel gibt, erscheinen auch Buttons zur Seitennavigation
++                      if (articles.isNotEmpty)
++                        Padding(
++                          padding: const EdgeInsets.symmetric(vertical: 10),
++                          child: Row(
++                            mainAxisAlignment: MainAxisAlignment.center,
++                            children: [
++                              ElevatedButton(
++                                onPressed: prevPage,
++                                child: Text("Prev"), // Zurück zur vorherigen Seite
++                              ),
++                              SizedBox(width: 10),
++                              Text("Page $currentPage"), // Aktuelle Seitennummer
++                              SizedBox(width: 10),
++                              ElevatedButton(
++                                onPressed: nextPage,
++                                child: Text("Next"), // Weiter zur nächsten Seite
++                              ),
++                            ],
++                          ),
++                        )
++                    ],
++                  ),
++                ),
++              ),
++      ),
++    );
++  }
++}
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/src/layouts/components/TheHeader.vue M2_abgabe/repo/apps/vue3/src/layouts/components/TheHeader.vue
+--- a/apps/vue3/src/layouts/components/TheHeader.vue	2025-04-28 11:00:53.000000000 +0200
++++ b/apps/vue3/src/layouts/components/TheHeader.vue	2025-05-16 19:36:44.000000000 +0200
+@@ -9,6 +9,20 @@
+     path: '/',
+     show: true,
+   },
++
++  //neuer Navigationseintrag
++  //--------------------------
++  // Fügt einen „Suche“-Link zur oberen Navigationsleiste hinzu, der zu „search.vue“ führt
++  // Dieser Link ist für alle Nutzer sichtbar, unabhängig vom Login-Status
++  {
++    label: 'Suche',
++    path: '/search',
++    show: true,
++  },
++  //--------------------------
++
++
++
+   {
+     label: 'Sign in',
+     path: '/login',
+@@ -63,4 +77,4 @@
+       </ul>
+     </div>
+   </nav>
+-</template>
++</template>
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/src/pages/search.vue M2_abgabe/repo/apps/vue3/src/pages/search.vue
+--- a/apps/vue3/src/pages/search.vue	1970-01-01 01:00:00.000000000 +0100
++++ b/apps/vue3/src/pages/search.vue	2025-05-16 19:36:44.000000000 +0200
+@@ -0,0 +1,296 @@
++<!--
++  Diese Komponente implementiert die Seite für die Volltextsuche.
++  Sie ermöglicht es Nutzern, ein oder mehrere Schlüsselwörter einzugeben, 
++  eine Suchanfrage an das Backend zu senden 
++  und die passenden Artikel in einem Feed-ähnlichen Layout anzuzeigen. 
++  Sie umfasst:
++  - Eingabevalidierung und Authentifizierungsprüfung,
++  - Lade- und Fehlerbehandlung,
++  - Seitennummerierung (Pagination),
++  - und Echtzeit-Anzeige der Suchergebnisse.
++-->
++
++<template>
++  <div class="container">
++    <div class="search-box">
++
++
++   <!-- 1/6- Erfasst die Eingabe des Benutzers und startet die Suche,
++   wenn auf den Button geklickt oder die Eingabetaste gedrückt wird.-->
++<!--------------------------------------------------------------->
++      <input
++        v-model="searchQuery"
++        @keyup.enter="startNewSearch"
++        placeholder="Gib ein oder mehrere Suchbegriffe ein"
++      />
++      <button @click="startNewSearch">Suchen</button>
++    </div>
++<!--------------------------------------------------------------->
++
++
++
++    <!-- Zeigt eine Fehlermeldung an, falls ein Fehler (z. B. keine Eingabe oder 401) vorliegt -->
++    <!------------------------------------------>
++    <div v-if="errorMessage" class="error-message">
++      {{ errorMessage }} <!-- Gibt den Text der Fehlermeldung aus -->
++    </div>
++    <!------------------------------------------>
++
++
++
++    <!-- Zeigt einen Ladehinweis während der Anfrage an -->
++    <!------------------------------------------>
++    <div v-if="isLoading" class="loading">
++      <p>Suche läuft...</p> <!-- Hinweistext, dass gesucht wird -->
++    </div>
++    <!------------------------------------------>
++
++
++
++    <!-- Zeigt die Anzahl der gefundenen Artikel nach einer erfolgreichen Suche -->
++    <!------------------------------------------>
++    <div v-if="searchPerformed && articlesCount > 0" class="search-summary">
++      <p><strong>{{ articlesCount }}</strong> Artikel gefunden.</p> <!-- Gibt die Trefferanzahl aus -->
++    </div>
++    <!------------------------------------------>
++
++
++
++
++    <!-- 6/6- Artikelvorschau -->
++  <!--------------------------------------------------------------->
++  <!--Zeigt jede Artikelvorschau im gleichen Design wie die bestehenden Artikelübersichten an -->
++    <div v-if="articles.length > 0">
++      <ArticlePreview
++        v-for="article in articles"
++        :key="article.slug"
++        :article="article"
++      />
++  <!--------------------------------------------------------------->
++
++
++
++    <!-- Anzeige der Paginierung unter den Suchergebnissen -->
++    <!------------------------------------------>
++      <div class="pagination">
++        <button @click="prevPage" :disabled="currentPage === 1">Zurück</button>
++        <span>Seite {{ currentPage }} von {{ totalPages }}</span>
++        <button @click="nextPage" :disabled="currentPage === totalPages">Weiter</button>
++      </div>
++    </div>
++    <!------------------------------------------>
++
++
++
++
++    <!-- Zeigt eine Nachricht an, wenn keine Artikel gefunden wurden -->
++    <!------------------------------------------>
++    <div v-else-if="searchPerformed && !isLoading && articles.length === 0">
++      <p>Keine Artikel gefunden.</p>
++    </div>
++    <!------------------------------------------>
++    
++  </div>
++</template>
++
++
++
++
++<script setup lang="ts">
++//Script-Bereich zur Steuerung der Suchlogik, der Datenverwaltung und der Benutzerinteraktion
++//------------------------------------------
++import ArticlePreview from '@/components/ArticlePreview.vue' // Komponente zur Darstellung eines Artikels
++import { ref, computed } from 'vue' // Reaktive Daten und berechnete Werte
++import { useUserStore } from '@/stores/useUserStore' // Zugriff auf Benutzerdaten und Authentifizierung
++
++const searchQuery = ref('') // Eingabe des Suchbegriffs
++const articles = ref<any[]>([]) // Liste der gefundenen Artikel
++const searchPerformed = ref(false) // Kennzeichnet, ob eine Suche durchgeführt wurde
++const articlesCount = ref(0) // Gesamtanzahl der gefundenen Artikel
++const limit = 10 // Anzahl der Artikel pro Seite
++const currentPage = ref(1) // Aktuell angezeigte Seite
++
++const isLoading = ref(false) // Anzeige, ob eine Suche gerade läuft
++const errorMessage = ref('') // Text für eventuelle Fehlermeldungen
++
++const userStore = useUserStore() // Zugriff auf Login-Daten (Token etc.)
++const totalPages = computed(() => Math.ceil(articlesCount.value / limit)) // Berechnet Seitenanzahl für Paginierung
++
++const startNewSearch = () => { // Startet eine neue Suche auf Seite 1
++  currentPage.value = 1
++  performSearch()
++}
++//------------------------------------------
++
++
++
++// 2/6- Such-Start
++//------------------------------------------------------------------
++const performSearch = async () => {
++  errorMessage.value = '' // Frühere Fehlermeldungen werden gelöscht
++  searchPerformed.value = false // searchPerformed wird auf false zurückgesetzt
++
++  if (!searchQuery.value.trim()) {
++    errorMessage.value = 'Bitte gib ein Suchwort ein.'
++    return // Die Eingabe wird geprüft (darf nicht leer sein)
++  }
++
++  if (!userStore.userInfo?.token) {
++    errorMessage.value = 'Nicht autorisiert. Bitte logge dich ein.'
++    return // Es wird überprüft, ob der Benutzer eingeloggt ist (Token muss vorhanden sein)
++  }
++  //------------------------------------------------------------------
++
++
++
++
++  // 3/6- Anfragevorbereitung
++  //------------------------------------------------------------------
++  const queryParam = encodeURIComponent(searchQuery.value.trim().replace(/\s+/g, '+')) // Formatiert die Suchanfrage (Leerzeichen → '+') und kodiert sie für die URL
++  const offset = (currentPage.value - 1) * limit // Berechnet den Offset basierend auf der aktuellen Seite für die Seitennummerierung (Paginierung)
++  //------------------------------------------------------------------
++
++
++
++  isLoading.value = true
++
++  try {
++    //4/6- Backend-API-Aufruf
++    //------------------------------------------------------------------
++    const response = await fetch(`http://localhost:8081/api/articles/search?query=${queryParam}&limit=${limit}&offset=${offset}`, { // Sendet eine GET-Anfrage an den Such-Endpunkt
++      headers: {
++        Authorization: `Bearer ${userStore.userInfo.token}`, // Sicherstellt nur eingeloggte Nutzer dürfen suchen
++        Accept: 'application/json'
++      }
++    //------------------------------------------------------------------
++    })
++
++
++
++    // Behandlung für den Fall, dass der Benutzer nicht authentifiziert ist (HTTP-Status 401)
++    //------------------------------------------
++    if (response.status === 401) {
++      errorMessage.value = 'Nicht autorisiert. Bitte logge dich ein.' // Fehlermeldung setzen
++      articles.value = [] // Artikel zurücksetzen
++      articlesCount.value = 0 // Trefferanzahl zurücksetzen
++      searchPerformed.value = true // Suche wurde durchgeführt, auch wenn keine Ergebnisse
++      return
++    }
++    //------------------------------------------
++
++
++
++    // Allgemeine Fehlerbehandlung bei fehlgeschlagener Serverantwort
++    //------------------------------------------
++    if (!response.ok) {
++      const errorText = await response.text() // Lese den Fehlertext aus der Antwort
++      errorMessage.value = 'Ein Fehler ist aufgetreten: ' + errorText // Zeige den Fehler im UI
++      articles.value = [] // Artikel zurücksetzen
++      articlesCount.value = 0 // Trefferanzahl zurücksetzen
++      searchPerformed.value = true // Suche wurde durchgeführt
++      return
++    }
++    //------------------------------------------
++
++
++
++
++
++    // 5/6- Verarbeitung der Backend-Antwort
++    //------------------------------------------------------------------
++    // Liest die JSON-Antwort aus und speichert Artikel sowie Gesamtanzahl für Anzeige und Paginierung
++    const result = await response.json()
++    articles.value = result.articles
++    articlesCount.value = result.articlesCount
++    searchPerformed.value = true
++    //------------------------------------------------------------------
++
++
++  // Fehlerbehandlung für Netzwerkprobleme oder unerwartete Fehler
++  //------------------------------------------
++  } catch (err) {
++    errorMessage.value = 'Netzwerkfehler. Bitte versuche es später erneut.' // Zeigt eine allgemeine Fehlermeldung bei z. B. Verbindungsproblemen
++  }
++  //------------------------------------------
++
++
++  // Wird immer ausgeführt, unabhängig vom Erfolg oder Fehler der Anfrage
++  //------------------------------------------
++  finally {
++    isLoading.value = false // Setzt den Ladezustand zurück, damit die Ladeanzeige verschwindet
++  }
++  //------------------------------------------
++
++}
++
++
++// Erhöht die aktuelle Seite, wenn noch weitere Seiten verfügbar sind, und startet die neue Suche
++//------------------------------------------------------------------
++const nextPage = () => {
++  if (currentPage.value < totalPages.value) {
++    currentPage.value++
++    performSearch()
++  }
++}
++//------------------------------------------------------------------
++
++
++
++// Verringert die aktuelle Seite, wenn man sich nicht auf Seite 1 befindet, und startet die neue Suche
++//------------------------------------------------------------------
++const prevPage = () => {
++  if (currentPage.value > 1) {
++    currentPage.value--
++    performSearch()
++  }
++}
++//------------------------------------------------------------------
++
++
++
++</script>
++
++<!-- CSS-Styles für das Layout und die Darstellung der Suchseite -->
++<!------------------------------------------>
++<style scoped>
++/* Stil für das Eingabefeld und den Button */
++.search-box {
++  display: flex; /* Elemente nebeneinander */
++  gap: 1rem; /* Abstand zwischen Input und Button */
++  margin: 1rem 0; /* Abstand nach oben und unten */
++}
++
++/* Stil für die Artikelvorschau */
++.article-preview {
++  padding: 1rem; /* Innenabstand */
++  border-bottom: 1px solid #ccc; /* Trennlinie zwischen Artikeln */
++}
++
++/* Stil für die Seitennavigation */
++.pagination {
++  display: flex; /* Elemente nebeneinander */
++  justify-content: center; /* Zentriert die Navigation */
++  align-items: center; /* Vertikale Zentrierung */
++  gap: 1rem; /* Abstand zwischen Buttons und Text */
++  margin-top: 1rem; /* Abstand nach oben */
++}
++
++/* Stil für die Anzeige der Trefferanzahl */
++.search-summary {
++  margin-bottom: 1rem; /* Abstand nach unten */
++  font-weight: bold; /* Fettgedruckter Text */
++}
++
++/* Stil für Fehlermeldungen */
++.error-message {
++  color: red; /* Rote Schriftfarbe */
++  margin: 1rem 0; /* Abstand oben und unten */
++}
++
++/* Stil für Ladehinweis */
++.loading {
++  font-style: italic; /* Kursivschrift */
++  color: #555; /* Graue Schriftfarbe */
++}
++</style>
++<!------------------------------------------>
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/apps/vue3/typed-router.d.ts M2_abgabe/repo/apps/vue3/typed-router.d.ts
+--- a/apps/vue3/typed-router.d.ts	2025-04-28 11:00:53.000000000 +0200
++++ b/apps/vue3/typed-router.d.ts	2025-05-16 19:36:44.000000000 +0200
+@@ -51,6 +51,11 @@
+     'Login': RouteRecordInfo<'Login', '/login', Record<never, never>, Record<never, never>>,
+     'ProfileId?': RouteRecordInfo<'ProfileId?', '/profile/:id?', { id?: ParamValueZeroOrOne<true> }, { id?: ParamValueZeroOrOne<false> }>,
+     'Register': RouteRecordInfo<'Register', '/register', Record<never, never>, Record<never, never>>,
++    //----------------------------------------
++    // automatisch generiert
++    // Fügt die Route '/search' hinzu, damit Nutzer die Suchseite öffnen können
++    'Search': RouteRecordInfo<'Search', '/search', Record<never, never>, Record<never, never>>,
++    //----------------------------------------
+     'Settings': RouteRecordInfo<'Settings', '/settings', Record<never, never>, Record<never, never>>,
+   }
+ }
+@@ -150,4 +155,4 @@
+ 
+     RouterLink: RouterLinkTyped<RouteNamedMap>
+   }
+-}
++}
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/docs/c4-l3-search-backend.wsd M2_abgabe/repo/docs/c4-l3-search-backend.wsd
+--- a/docs/c4-l3-search-backend.wsd	1970-01-01 01:00:00.000000000 +0100
++++ b/docs/c4-l3-search-backend.wsd	2025-05-16 19:36:44.000000000 +0200
+@@ -0,0 +1,85 @@
++@startuml
++!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
++
++System_Boundary(conduit_block,"Conduit"){
++    Container(conduit_frontend_web,"Conduit Web Frontend","Vue.js/TypeScript","Provides a system to show, edit, and remove blog articles, user accounts, and comments in a webbrowser")
++    Container(conduit_frontend_os,"Conduit OS Frontend","Flutter/Dart","Provides a system to show, edit, and remove blog articles, user accounts, and comments in an operating system.")
++    Container_Boundary(conduit_backend_dot,"Conduit Backend") {
++        /'
++            ASP.Net7.0/C#
++            Creates, reads, updates, deletes (CRUD-operations) blog articles, user accounts, and comments.
++        '/
++            Component(api,"API","C#","setup routes and services; starts application")
++            Component(core,"Core","C#","Representation of Conduit objects, defines database commands")
++            Component(data,"Data","C#","init and manage database")
++            Component(infrastructure,"Infrastructure","C#","handling custom authentication, logging and other utilities")
++            Component_Ext(carter,"Carter","C#","extension of ASP.NET to map endpoints",$link="https://github.com/CarterCommunity/Carter")
++            Component_Ext(asp.net,"ASP.NET Core","C#","Framework for WebApplication")
++
++
++        ' Komponenten zur Volltextsuche
++        Component(articles_module,"ArticlesModule","C#","Definiert die REST-Routen, einschließlich /api/articles/search")
++        Component(articles_handler,"ArticlesHandler","C#","Enthält die Suchlogik: SearchArticlesAsync()")
++
++        Container_Boundary(data_layer,"Data Layer") {
++            Component(repository,"ConduitRepository","C#","Implementiert IConduitRepository, inklusive GetAllArticlesAsync()")
++            Component(conduit_context,"ConduitContext","C#","Entity Framework Core-Kontext für den Zugriff auf Artikel, Nutzer, Kommentare")
++        }
++    }
++
++    ContainerDb(conduit_database,"Conduit Database","SQLite|in-memory or file-based/SQL ", "Stores articles, user accounts, and comments")
++}
++
++'general
++Rel(conduit_frontend_os,api,"communicates frontend changes","HTTP/REST")
++Rel(conduit_frontend_web,api,"communicates frontend changes","HTTP/REST")
++Rel(data,conduit_database,"communicates data changes","SQL")
++
++'backend
++Rel(api,data,"setup database handler")
++Rel(api,asp.net,"setup application")
++Rel(api,infrastructure,"uses")
++Rel(infrastructure,asp.net,"provides services")
++Rel(asp.net,data,"init database handler")
++Rel(data,core,"uses")
++Rel(api,core,"uses representations")
++Rel(carter,asp.net,"map API endpoints")
++Rel(api,carter,"register endpoints")
++
++'Beziehungen für Suche
++Rel(conduit_frontend_web, articles_module, "fragt Artikel ab", "HTTP/GET /api/articles/search")
++Rel(conduit_frontend_os, articles_module, "fragt Artikel ab", "HTTP/GET /api/articles/search")
++Rel(carter, articles_module, "mapped den Pfad /api/articles/search")
++Rel(articles_module, articles_handler, "ruft SearchArticlesAsync() auf")
++Rel(articles_handler, repository, "fragt alle Artikel ab", "GetAllArticlesAsync()")
++Rel(repository, conduit_context, "verwendet", "LINQ")
++Rel(conduit_context, conduit_database, "führt Abfragen aus", "SQL")
++Rel(repository, core, "verwendet Entitäten", "Article, Tag")
++Rel(articles_handler, core, "verwendet DTOs", "SearchQuery, ArticlesResponseDto")
++
++SHOW_FLOATING_LEGEND()
++@enduml
++
++
++
++
++
++
++
++
++
++
++
++
++/'
++
++Dieses Diagramm zeigt den Backend-Aufbau des Conduit-Systems. Das System basiert auf einer ASP.NET Core-Anwendung und besteht aus den Modulen API, Core, Data und Infrastructure. Diese Komponenten übernehmen typische
++Aufgaben wie das Erstellen, Anzeigen, Ändern und Löschen von Artikeln, Nutzern und Kommentaren. Die Daten werden mit Entity Framework Core verarbeitet und in einer SQLite-Datenbank gespeichert. Die Verbindung mit dem Frontend erfolgt über HTTP
++
++Für die neue Volltextsuche wurde die Architektur um mehrere Bestandteile erweitert: Das Modul `ArticlesModule` stellt die Route `/api/articles/search` bereit. Diese Route wird durch das Carter-Framework im Backend registriert
++Die Suchanfrage wird an `ArticlesHandler` weitergeleitet, der die Methode `SearchArticlesAsync()` aufruft. Dort erfolgt auch die eigentliche Filterung: Zuerst werden über `ConduitRepository.GetAllArticlesAsync()` alle Artikel aus der Datenbank 
++geladen (unter Verwendung ConduitContext).Anschließend prüft die Methode `SearchArticlesAsync()`, ob alle Suchwörter als ganze Wörter im Titel, im Text oder in den Tags eines Artikels vorkommen 
++und nach dieser Filterung wird das Suchergebnis an das Frontend zurückgegeben. Die DTOs `SearchQuery` und `ArticlesResponseDto` aus dem Core-Modul sorgen dabei für eine saubere Übergabe der Parameter und Ergebnisse
++
++
++'/
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/docs/c4-l3-search-nativefrontend.wsd M2_abgabe/repo/docs/c4-l3-search-nativefrontend.wsd
+--- a/docs/c4-l3-search-nativefrontend.wsd	1970-01-01 01:00:00.000000000 +0100
++++ b/docs/c4-l3-search-nativefrontend.wsd	2025-05-16 19:36:44.000000000 +0200
+@@ -0,0 +1,129 @@
++@startuml
++!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
++
++Person(user,"Conduit User","reads and writes articles as well as comments, add and edit user accounts")
++
++System_Boundary(conduit_block,"Conduit"){
++    Container_Boundary(conduit_frontend_native,"Conduit Native Frontend"){
++    /'
++        Flutter/Dart
++        Provides a system to show, edit, and remove blog articles, user accounts, and comments in an operating system.
++    '/
++        Component(main,"Main","Dart","Setup Application")
++        Component(bloc,"BLoC","Dart","State Management - **B**usiness **Lo**gic **C**omponent")
++        Component(config,"Config","Dart","configures paths, provide local storage,")
++        Component(model,"Model","Dart","transforms Conduit objects from/to JSON")
++        Component(navigator,"Navigator","Dart","Setup and manage routing")
++        Component(repository,"Repository","Dart","manage articles, authentication")
++        Component(services,"Services","Dart","user state management")
++        Component(ui,"UI","Dart","provides widgets for UI")
++        Component(utils,"Utils","Dart","messaging, screen transitioning, app colors, exception handling")
++        Component(widget,"Widget","Dart","defines several widgets")
++        Component(windows,"Windows Application","C++")
++        Component(linux,"Linux Application","C++")
++        Component(macos,"macOS Application","Swift")
++        Component(web,"Web Application","HTML/CSS/JavaScriot")
++        Component_Ext(flutter,"Flutter","Dart",$link="https://docs.flutter.dev/","Framework")
++        Component_Ext(http,"HTTP",$link="https://pub.dev/packages/http","Dart","future-based http client")
++        Component_Ext(hive,"Hive",$link="https://github.com/isar/hive","Dart","key-value-based database")
++
++        ' Komponenten zur Volltextsuche
++        Component(search_screen,"SearchScreen","Dart","Suchseite mit Eingabe, Anzeige und Paginierung")
++        Component(search_method,"searchArticles()","Dart","Methode in Repository für GET-Anfrage an /api/articles/search")
++    }
++
++    Container(conduit_backend_dot,"Conduit Backend","ASP.Net7.0/C#", "Creates, reads, updates, deletes (CRUD-operations) blog articles, user accounts, and comments.")
++}
++
++'Context Relation
++Rel(user,windows, "uses via operating system")
++Rel(user,linux, "uses via operating system")
++Rel(user,macos, "uses via operating system")
++Rel(user,ui, "uses via operating system")
++Rel(repository,conduit_backend_dot,"communicates frontend changes","HTTP/REST")
++Rel(http,conduit_backend_dot,"conducts HTTP requests","HTTP/REST")
++Rel(services,conduit_backend_dot,"communicates user authentication requests","HTTP/REST")
++'Container Relations
++
++Rel(flutter,main,"ensemble")
++Rel(flutter,windows,"ensemble")
++Rel(flutter,linux,"ensemble")
++Rel(flutter,macos,"ensemble")
++Rel(flutter,web,"ensemble")
++Rel(bloc,model,"uses representations")
++Rel(bloc,repository,"uses backend")
++Rel(bloc,config,"uses user session storage")
++Rel(bloc,http,"handles register state")
++Rel(main,bloc,"uses follow/like state")
++Rel(main,config,"uses storage")
++Rel(main,flutter,"uses")
++Rel(main,hive,"use storage for user")
++Rel(main,model,"uses user model")
++Rel(main,navigator,"init navigation/routing")
++Rel(main,repository,"linking backend layer")
++Rel(main,ui,"uses start screen")
++Rel(main,utils,"uses app colors")
++Rel(navigator,bloc,"assembles states")
++Rel(navigator,ui,"uses widgets")
++Rel(navigator,utils,"uses app colors/screen transition")
++Rel(navigator,flutter,"uses")
++Rel(navigator,main,"uses fonts")
++Rel(repository,config,"uses path constants")
++Rel(repository,http,"setup http requests")
++Rel(repository,model,"uses representations")
++Rel(repository,services,"uses user information")
++Rel(ui,bloc,"uses")
++Rel(ui,config,"uses")
++Rel(ui,flutter,"uses")
++Rel(ui,hive,"uses")
++Rel(ui,main,"uses fonts"),,
++Rel(ui,model,"uses")
++Rel(ui,navigator,"uses")
++Rel(ui,utils,"uses")
++Rel(ui,widget,"uses")
++Rel(utils,hive,"uses local storage")
++Rel(utils,flutter,"uses")
++Rel(utils,main,"uses fonts")
++Rel(utils,ui,"direction to screen")
++Rel(services,flutter,"uses")
++Rel(services,hive,"uses local storage")
++Rel(services,http,"setup user authentication requests")
++Rel(services,model,"uses representations")
++Rel(services,repository,"uses articles")
++Rel(services,utils,"uses messaging system, exception handling")
++Rel(widget,bloc,"uses state")
++Rel(widget,config,"uses storage")
++Rel(widget,flutter,"uses")
++Rel(widget,hive,"uses storage")
++Rel(widget,ui,"uses")
++Rel(widget,utils,"uses app colors")
++Rel(widget,main,"uses fonts")
++Rel(widget,model,"uses representations")
++
++'Beziehungen für Suche
++Rel(user, search_screen, "interagiert mit der Suchoberfläche", "z.B. Texteingabe und Navigation")
++Rel(search_screen, search_method, "ruft Methode searchArticles(query, offset, limit) auf", "zum Start der Suche")
++Rel(search_method, repository, "ist implementiert in AllArticlesImpl", "enthält die Suchlogik")
++Rel(search_method, http, "sendet HTTP-GET-Anfrage an /api/articles/search", "inkl. Query, Limit, Offset und Token")
++Rel(search_screen, ui, "verwendet UI-Komponenten", "wie ListView und ArticleWidgets zur Darstellung")
++Rel(search_screen, utils, "nutzt Hilfsmittel", "z.B. Farben, Ladeindikator, Fehlermeldungen")
++
++
++SHOW_FLOATING_LEGEND()
++@enduml
++
++
++
++
++
++
++
++
++/'
++
++Dieses Diagramm zeigt, wie die Volltextsuche in das Flutter-Frontend von Conduit integriert wurde. Die neue Seite SearchScreen ist die zentrale Komponente der Suche. Hier kann der Nutzer Begriffe eingeben 
++und erhält passende Artikel mit Paginierung. Die Suchanfrage wird über die Methode searchArticles() ausgelöst, die in der Klasse AllArticlesImpl im Repository definiert ist. Sie sendet eine HTTP-GET-Anfrage an den 
++Endpunkt /api/articles/search. Dabei werden Suchbegriff, Limit, Offset und ein Authentifizierungs-Token mitgesendet. Die Ergebnisse werden mit UI-Komponenten dargestellt, z.B einer ListView und Artikelvorschau-Widgets
++Unterstützende Funktionen wie Farbschema, Ladeanzeige oder Fehlermeldungen werden aus dem utils-Modul übernommen
++
++'/
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/docs/c4-l3-search-webfrontend.wsd M2_abgabe/repo/docs/c4-l3-search-webfrontend.wsd
+--- a/docs/c4-l3-search-webfrontend.wsd	1970-01-01 01:00:00.000000000 +0100
++++ b/docs/c4-l3-search-webfrontend.wsd	2025-05-16 19:36:44.000000000 +0200
+@@ -0,0 +1,98 @@
++@startuml
++!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
++
++Person(user,"Conduit User","reads and writes articles as well as comments, add and edit user accounts")
++
++System_Boundary(conduit_block,"Conduit"){
++    Container_Boundary(conduit_frontend_web,"Conduit Web Frontend"){
++        /'
++        Provides a system to show, edit, and remove blog articles, user accounts, and comments in a webbrowser
++        [Vue.js/TypeScript]
++        '/
++        Component(api,"API","TypeScript","Provides Interface to Backend")
++        Component(components,"Components","TypeScript/Vue","Manage articles, authentication, tagging, likes")
++        Component(layouts,"Layouts","TypeScript/Vue","Basic Layout")
++        Component(pages,"Pages","TypeScript/Vue")
++        Component(router,"Router","TypeScript","Client-side routing, defines permissions")
++        Component(types,"Types","TypeScript","Defines Data Abstractions ")
++        Component(stores,"Stores","TypeScript","Stores user information")
++        Component(utils,"Utils","TypeScript","Request Handling, Formatting")
++        Component(main,"Main","TypeScript/Vue","Constructs App")
++        Component(spa,"index.html","HTML","Shows Single Page Application")
++        Component_Ext(vite_plugins,"Vite Layout/Routing Plugins","TypeScript","Setup Layout and Routing for Vue")
++        Component_Ext(vue,"Vue.js","TypeScript","Framework Vue.js 3")
++        Component_Ext(pinia,"Pinia","TypeScript","State Management")
++        Component_Ext(axios,"Axios","JavaScript/TypeScript","Promise-based HTTP Client for Asynchronous Requests")
++
++        ' Komponenten zur Volltextsuche
++        Component(search_vue, "search.vue", "Vue.js", "Komponente für Volltextsuche mit Eingabe, API-Aufruf, Anzeige und Pagination")
++        Component(fetch_call, "fetch(...) in search.vue", "JavaScript", "GET-Anfrage an /api/articles/search mit JWT-Token")
++        Component(the_header, "TheHeader.vue", "Vue.js", "Navigationsleiste mit Link zur Suche")
++        Component(article_preview, "ArticlePreview.vue", "Vue.js", "Komponente zur Anzeige eines einzelnen Artikels als Vorschau")
++    }
++
++    Container(conduit_backend_dot,"Conduit Backend","ASP.Net7.0/C#", "Handles all backend logic including search")
++}
++
++Rel(user,spa, "uses via webbrowser","HTTP/REST")
++Rel(main,vue, "initialize app")
++Rel(main,router, "setup routing")
++Rel(main,components, "constructs components")
++Rel(vue,router, "uses")
++Rel(vue,pinia, "uses")
++Rel(main,pinia, "initialize state management")
++Rel(api,types,"uses")
++Rel(api,conduit_backend_dot,"communicates frontend changes","HTTP/REST")
++Rel(api,utils,"uses request handling")
++Rel(axios,conduit_backend_dot,"conducts request handling","HTTP/REST")
++Rel(stores,api,"obtains user information")
++Rel(components,api,"obtains article information")
++Rel(components,types,"uses")
++Rel(components,utils,"uses formatting")
++Rel(components,stores,"uses")
++Rel(components,vue,"uses")
++Rel(components,router,"uses")
++Rel(pages,router,"uses")
++Rel(pages,api,"uses")
++Rel(pages,utils,"uses formatting")
++Rel(pages,stores,"uses")
++Rel(pages,types,"uses")
++Rel(pages,vue,"uses")
++Rel(utils,axios,"uses for request handling")
++Rel(spa,main,"uses")
++Rel(layouts,stores,"uses")
++Rel(router,vite_plugins,"uses")
++Rel(vite_plugins,components,"use layout templates")
++Rel(vite_plugins,layouts,"use layout templates")
++Rel(vite_plugins,pages,"setup file routing")
++
++'Beziehungen für Suche
++Rel(user, the_header, "klickt auf Suchlink", "Navigiert zu /search")
++Rel(the_header, router, "router-link zu /search")
++Rel(router, search_vue, "lädt Suchseite")
++Rel(search_vue, fetch_call, "ruft API-Endpunkt auf")
++Rel(fetch_call, conduit_backend_dot, "GET /api/articles/search")
++Rel(search_vue, stores, "greift auf userStore zu (Token)")
++Rel(search_vue, article_preview, "zeigt Artikelvorschau", "v-for")
++Rel(search_vue, vue, "nutzt reaktive Datenbindung")
++Rel(fetch_call, axios, "nutzt Axios für HTTP")
++
++SHOW_FLOATING_LEGEND()
++@enduml
++
++
++
++
++
++
++
++
++
++/'
++
++Dieses Diagramm zeigt, wie die Volltextsuche in das Vue.js-Webfrontend von Conduit integriert wurde. Das zentrale Element dieser Erweiterung ist die Vue-Komponente search.vue, die dem Benutzer ermöglicht, mehrere Suchbegriffe
++einzugeben und die passenden Artikel mit Paginierung anzuzeigen. Der Einstieg in die Suche erfolgt über einen neuen Link in der Navigationsleiste (TheHeader.vue), der über den Router zur Seite search.vue führt. Dort wird mit 
++fetch(...) eine Anfrage an den neuen Backend-Endpunkt /api/articles/search gesendet. Der dafür nötige Token wird aus dem userStore geladen. Die HTTP-Kommunikation erfolgt über das Axios-Modul. Die erhaltenen Artikel werden in 
++search.vue mit der Komponente ArticlePreview.vue angezeigt, die bereits im restlichen System für die Artikelanzeige verwendet wird
++
++'/
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/docs/c4-l4-search_flutter.wsd M2_abgabe/repo/docs/c4-l4-search_flutter.wsd
+--- a/docs/c4-l4-search_flutter.wsd	1970-01-01 01:00:00.000000000 +0100
++++ b/docs/c4-l4-search_flutter.wsd	2025-05-16 19:36:44.000000000 +0200
+@@ -0,0 +1,53 @@
++@startuml 
++title Sequenzdiagramm: Volltextsuche (Flutter → Backend) – Level 4
++
++actor User
++
++participant "Flutter: SearchScreen" as SearchScreen
++participant "AllArticlesImpl.searchArticles(...)" as Repository
++participant "API Endpoint: GET /api/articles/search" as HttpEndpoint
++participant "ArticlesHandler.SearchArticlesAsync(...)" as Handler
++participant "ConduitRepository.GetAllArticlesAsync(...)" as DBRepo
++participant "SQLite DB" as Database
++
++User -> SearchScreen : Gibt Suchbegriff ein + klickt auf Suchsymbol (oder Enter)
++SearchScreen -> Repository : searchArticles(query, offset, limit)
++Repository -> HttpEndpoint : GET /api/articles/search?... + Authorization
++
++alt Erfolgreicher Aufruf (Token gültig)
++HttpEndpoint -> Handler : SearchArticlesAsync(query, limit, offset, user)
++Handler -> DBRepo : GetAllArticlesAsync()
++DBRepo -> Database : SELECT * FROM Articles + Tags + Author
++Database --> DBRepo : Artikelliste
++DBRepo --> Handler : Alle Artikel mit Tags + Author
++Handler --> HttpEndpoint : Gefilterte Artikel (JSON)
++HttpEndpoint --> Repository : HTTP 200 OK + JSON
++Repository --> SearchScreen : Artikel + Trefferanzahl
++SearchScreen -> User : Zeige Artikelvorschau + Paginierung
++else Fehler: Kein Token / Ungültig
++HttpEndpoint --> Repository : HTTP 401 Unauthorized
++Repository --> SearchScreen : Fehler wird geworfen
++SearchScreen -> User : Zeigt Fehlermeldung
++end
++@enduml
++
++
++
++
++
++
++
++
++
++
++/'
++
++Dieses Sequenzdiagramm zeigt den Ablauf der Volltextsuche in der Flutter-App vom Frontend bis zur Datenbank. Zuerst gibt der Benutzer einen Suchbegriff in der SearchScreen-Oberfläche ein und startet die Suche durch einen Klick auf das Suchsymbol(oder Enter)
++Daraufhin wird die Methode searchArticles(...) aus dem Repository AllArticlesImpl aufgerufen. Diese sendet direkt per http.get(...) einen HTTP-GET-Request an den API-Endpunkt /api/articles/search, wobei 
++der im Hive gespeicherte Token im Header mitgesendet wird. Ist der Token gültig, wird der Aufruf an die Methode SearchArticlesAsync(...) im ArticlesHandler weitergeleitet. Diese ruft GetAllArticlesAsync(...) aus 
++dem ConduitRepository auf, um alle Artikel inklusive Tags und Autor aus der Datenbank zu laden. Nach dem Filtern anhand der Suchbegriffe wird die Ergebnisliste in JSON-Format an den Client zurückgegeben
++Das Flutter-UI zeigt anschließend die Artikelvorschau und Paginierung an
++
++Falls jedoch kein gültiger Token vorhanden ist oder die Authentifizierung fehlschlägt, antwortet der Server mit HTTP 401. Dieser Fehler wird in Flutter als Exception erkannt, und dem Nutzer wird eine Fehlermeldung angezeigt
++
++'/
+\ No newline at end of file
+diff -ruN -x node_modules -x bin -x obj -x .dart_tool -x build -x '*.db' -x '*.lock' -x package-lock.json -x pnpm-lock.yaml -x '*.png' -x '*.jpg' -x '*.jar' -x '*.apk' -x '*.svg' -x test_tokens.txt -x '*.Designer.cs' -x ConduitContextModelSnapshot.cs -x '*.g.dart' -x ReadMe.md -x .github a/docs/c4-l4-search_vue.wsd M2_abgabe/repo/docs/c4-l4-search_vue.wsd
+--- a/docs/c4-l4-search_vue.wsd	1970-01-01 01:00:00.000000000 +0100
++++ b/docs/c4-l4-search_vue.wsd	2025-05-16 19:36:44.000000000 +0200
+@@ -0,0 +1,55 @@
++@startuml
++title Sequenzdiagramm: Volltextsuche (Vue 3 → Backend) – Level 4
++
++actor User
++
++participant "Vue: search.vue" as SearchPage
++participant "Pinia: useUserStore" as TokenStore
++participant "fetch(...) in search.vue" as FetchCall
++participant "API Endpoint: GET /api/articles/search" as HttpEndpoint
++participant "ArticlesHandler.SearchArticlesAsync(...)" as Handler
++participant "ConduitRepository.GetAllArticlesAsync(...)" as Repository
++participant "SQLite DB" as Database
++
++User -> SearchPage : Gibt Suchbegriffe ein + klickt „Suchen“ (oder Enter)
++SearchPage -> TokenStore : Lese userInfo.token
++
++alt Token ist vorhanden
++    SearchPage -> FetchCall : GET /api/articles/search?...+ Authorization 
++    FetchCall -> HttpEndpoint : GET /api/articles/search
++
++    HttpEndpoint -> Handler : SearchArticlesAsync(query, limit, offset, user)
++    Handler -> Repository : GetAllArticlesAsync()
++    Repository -> Database : SELECT * FROM Articles + Tags + Author
++    Database --> Repository : Artikelliste
++    Repository --> Handler : Alle Artikel mit Tags + Author
++
++    Handler --> HttpEndpoint : Gefilterte Artikel (JSON)
++    HttpEndpoint --> FetchCall : HTTP 200 OK + JSON
++    FetchCall --> SearchPage : Artikel + Trefferanzahl
++    SearchPage -> User : Zeige Artikelvorschau + Paginierung
++
++else Kein Token vorhanden
++    SearchPage -> User : Zeige Fehlermeldung: „Nicht autorisiert. Bitte logge dich ein“
++end
++@enduml
++
++
++
++
++
++
++
++
++
++
++/'
++
++Dieses Sequenzdiagramm beschreibt den Ablauf der Volltextsuche in der Vue-3-Frontend. Zuerst gibt Der Nutzer einen oder mehrere Suchbegriffe in der search.vue-Komponente ein und klickt auf den „Suchen“-Button (oder Enter)
++Die Komponente prüft zunächst, ob ein gültiges Token über den Pinia-Store (useUserStore) vorhanden ist. Ist ein Token vorhanden, wird ein fetch-Aufruf mit Authorization-Header an den API-Endpunkt GET /api/articles/search gesendet
++Im Backend ruft der Controller die Methode SearchArticlesAsync(...) im ArticlesHandler auf. Diese wiederum holt mit GetAllArticlesAsync(...) alle Artikel aus der Datenbank, inklusive Tags und Autoreninformationen
++Die Treffer werden dann entsprechend der Suchbegriffe gefiltert. Das Ergebnis wird über den gesamten Aufrufpfad zurückgegeben und schließlich in search.vue dargestellt, inklusive Trefferanzahl und Paginierung
++
++Falls hingegen kein Token vorhanden ist, wird der HTTP-Request nicht ausgeführt. Stattdessen zeigt die search.vue-Komponente sofort eine Fehlermeldung an: Nicht autorisiert. Bitte logge dich ein.
++
++'/
+\ No newline at end of file
